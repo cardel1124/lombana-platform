@@ -34,11 +34,10 @@ async function run() {
   }
 
   // 2. Create admin
-  console.log('👤 Configurando usuario administrador...\n');
-  const adminDoc  = (await ask('   Documento admin [admin]: ')) || 'admin';
-  const adminName = (await ask('   Nombre completo [Administrador]: ')) || 'Administrador';
-  const adminEmail= (await ask('   Correo admin: ')) || 'admin@solucionesacademicas.com';
-  const adminPass = (await ask('   Contraseña admin (mín. 8 chars): ')) || 'lombana2026';
+  const adminDoc = 'admin';
+  const adminName = 'Carlos Daniel Duran';
+  const adminEmail = 'delaossa1991@gmail.com';
+  const adminPass = 'lombana2026';
 
   if (adminPass.length < 6) { console.log('❌ Contraseña muy corta.'); process.exit(1); }
 
