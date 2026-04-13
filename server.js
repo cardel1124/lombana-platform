@@ -25,6 +25,7 @@ const pool = new Pool({
 });
 
 pool.on('error', (err) => console.error('DB error:', err));
+pool.query('ALTER TABLE simulacros ADD COLUMN school_id INTEGER;').catch(e => {});
 
 async function query(text, params) {
   const client = await pool.connect();
