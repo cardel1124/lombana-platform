@@ -25,8 +25,7 @@ const pool = new Pool({
 });
 
 pool.on('error', (err) => console.error('DB error:', err));
-pool.query('ALTER TABLE simulacros ADD COLUMN school_id INTEGER;').catch(e => {});
-
+pool.query('ALTER TABLE simulacros DROP COLUMN IF EXISTS created_by, DROP COLUMN IF EXISTS school_id;').then(() => pool.query('ALTER TABLE simulacros ADD COLUMN created_by UUID, ADD COLUMN school_id UUID;')).catch(e => {});
 async function query(text, params) {
   const client = await pool.connect();
   try { return await client.query(text, params); }
