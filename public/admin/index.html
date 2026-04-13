@@ -240,7 +240,7 @@ tbody tr:hover{background:var(--g50)}
 <div class="modal-box">
   <h3 class="modal-title">📤 Nuevo Simulacro</h3>
   <div class="tabs">
-    <div class="tab-btn active" onclick="switchUpTab('file',this)">📄 Archivo (PDF/DOCX)</div>
+    <div class="tab-btn active" onclick="switchUpTab('file',this)">📄 Archivo (PDF · DOCX · ZIP)</div>
     <div class="tab-btn" onclick="switchUpTab('html',this)">🌐 Pegar HTML</div>
     <div class="tab-btn" onclick="switchUpTab('manual',this)">✏ Manual</div>
   </div>
@@ -248,24 +248,24 @@ tbody tr:hover{background:var(--g50)}
     <div class="upload-area" id="drop-zone" onclick="document.getElementById('file-input').click()" ondragover="event.preventDefault();this.classList.add('dragover')" ondragleave="this.classList.remove('dragover')" ondrop="handleDrop(event)">
       <div style="font-size:3rem;margin-bottom:12px">📄</div>
       <h3 style="color:var(--navy);margin-bottom:6px">Arrastra tu archivo aquí</h3>
-      <p style="color:var(--g600);font-size:.85rem">PDF, DOCX, HTML · Máximo 30 MB</p>
-      <p style="font-size:.78rem;color:var(--g400);margin-top:6px">El sistema extraerá automáticamente las preguntas, opciones e imágenes</p>
+      <p style="color:var(--g600);font-size:.85rem">PDF, DOCX, HTML · ZIP con imágenes · Máx 50 MB</p>
+      <p style="font-size:.78rem;color:var(--g400);margin-top:6px">ZIP = archivo HTML + carpeta imagen/ · El sistema extrae preguntas, opciones e imágenes automáticamente</p>
       <button class="btn btn-navy btn-sm" style="margin-top:14px" onclick="event.stopPropagation();document.getElementById('file-input').click()">Seleccionar archivo</button>
-      <input id="file-input" type="file" accept=".pdf,.docx,.doc,.html,.htm" class="hidden" onchange="handleFileSelect(this)">
+      <input id="file-input" type="file" accept=".pdf,.docx,.doc,.html,.htm,.zip" class="hidden" onchange="handleFileSelect(this)">
     </div>
-    <div id="upload-progress" class="hidden" style="margin-top:14px">
+    <div id="upload-progress" style="display:none;margin-top:14px">
       <div style="display:flex;align-items:center;gap:12px">
         <div style="width:20px;height:20px;border:3px solid var(--g200);border-top-color:var(--gold);border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0"></div>
         <span id="upload-msg" style="font-size:.88rem;color:var(--g600)">Procesando...</span>
       </div>
     </div>
   </div>
-  <div id="utab-html" class="tab-content hidden">
+  <div id="utab-html" class="tab-content" style="display:none">
     <div class="form-group"><label class="form-label">Pega el contenido HTML o texto del simulacro</label>
       <textarea id="html-input" class="form-control" rows="10" placeholder="Pega aquí el HTML o texto con el formato del simulacro..."></textarea></div>
     <button class="btn btn-navy" onclick="parseHtmlInput()">Procesar →</button>
   </div>
-  <div id="utab-manual" class="tab-content hidden">
+  <div id="utab-manual" class="tab-content" style="display:none">
     <div class="grid-2">
       <div class="form-group"><label class="form-label">Título *</label><input id="man-title" class="form-control" placeholder="Simulacro 1 - Concurso Docente..."></div>
       <div class="form-group"><label class="form-label">Curso *</label>
@@ -285,7 +285,7 @@ tbody tr:hover{background:var(--g50)}
     <button class="btn btn-gold" onclick="createManualSim()">Crear y Editar →</button>
   </div>
 
-  <div id="sim-editor" class="hidden" style="margin-top:22px;border-top:2px solid var(--g200);padding-top:22px">
+  <div id="sim-editor" style="display:none;margin-top:22px;border-top:2px solid var(--g200);padding-top:22px">
     <h3 style="font-size:1rem;color:var(--navy);margin-bottom:16px">✏ Editor del Simulacro</h3>
     <div class="grid-3" style="margin-bottom:18px">
       <div class="form-group"><label class="form-label">Título *</label><input id="ed-title" class="form-control" placeholder="Título..."></div>
@@ -638,30 +638,85 @@ async function loadSimulacros(){
 async function toggleSim(id,active){try{await apiFetch('/simulacros/'+id,{method:'PUT',body:JSON.stringify({active})});loadSimulacros();}catch(e){alert(e.message);}}
 async function deleteSim(id,title){if(!confirm('¿Eliminar "'+title+'"? Esta acción es irreversible.'))return;try{await apiFetch('/simulacros/'+id,{method:'DELETE'});loadSimulacros();}catch(e){alert(e.message);}}
 
-function openUploadModal(){editorData={situations:[]};document.getElementById('upload-modal').classList.remove('hidden');document.getElementById('sim-editor').classList.add('hidden');document.getElementById('upload-progress').classList.add('hidden');}
-function closeUploadModal(){document.getElementById('upload-modal').classList.add('hidden');}
-function switchUpTab(t,el){document.querySelectorAll('#upload-modal .tab-btn').forEach(b=>b.classList.remove('active'));el.classList.add('active');['file','html','manual'].forEach(id=>{const tab=document.getElementById('utab-'+id);tab.classList.toggle('active',id===t);tab.style.display=id===t?'block':'none';});}
+function openUploadModal(){
+  editorData={situations:[]};
+  document.getElementById('upload-modal').classList.remove('hidden');
+  document.getElementById('sim-editor').style.display='none';
+  document.getElementById('upload-progress').style.display='none';
+  // Reset tabs: show file tab only
+  switchUpTab('file', document.querySelector('#upload-modal .tab-btn'));
+}
+function closeUploadModal(){
+  document.getElementById('upload-modal').classList.add('hidden');
+  document.getElementById('sim-editor').style.display='none';
+  document.getElementById('upload-progress').style.display='none';
+  editorData={situations:[]};
+}
+function switchUpTab(t,el){
+  document.querySelectorAll('#upload-modal .tab-btn').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  ['file','html','manual'].forEach(id=>{
+    const tab=document.getElementById('utab-'+id);
+    if(id===t){ tab.classList.remove('hidden'); tab.classList.add('active'); tab.style.display='block'; }
+    else { tab.classList.add('hidden'); tab.classList.remove('active'); tab.style.display='none'; }
+  });
+}
 function handleDrop(e){e.preventDefault();document.getElementById('drop-zone').classList.remove('dragover');const f=e.dataTransfer.files[0];if(f)uploadFile(f);}
 function handleFileSelect(inp){if(inp.files[0])uploadFile(inp.files[0]);}
 
 async function uploadFile(file){
-  const prog=document.getElementById('upload-progress');prog.classList.remove('hidden');
+  const prog=document.getElementById('upload-progress');prog.style.display='block';
   document.getElementById('upload-msg').textContent='Procesando "'+file.name+'"...';
   try{
     const fd=new FormData();fd.append('file',file);
     const data=await apiUpload('/upload/simulacro',fd);
-    document.getElementById('upload-msg').textContent='✅ Procesado: '+data.totalQuestions+' preguntas encontradas en '+data.totalSituations+' situaciones.';
-    if(data._note)document.getElementById('upload-msg').textContent+=' '+data._note;
+    const qCount=data.totalQuestions||0, sCount=data.totalSituations||0;
+    let msg='✅ '+qCount+' preguntas en '+sCount+' situaciones.';
+    if(data.images&&data.images.length)msg+=' 🖼 '+data.images.length+' imágenes subidas.';
+    if(data._note)msg+=' ⚠ '+data._note;
+    document.getElementById('upload-msg').textContent=msg;
     editorData=data;
-    openEditor(file.name.replace(/\.[^.]+$/,''));
-  }catch(e){document.getElementById('upload-msg').textContent='❌ '+e.message;}
+    // Pre-fill title and course from parsed data
+    const suggestedTitle = data.title || file.name.replace(/\.[^.]+$/,'');
+    openEditor(suggestedTitle);
+    // Detect course from title
+    const tl = suggestedTitle.toLowerCase();
+    const edCourse = document.getElementById('ed-course');
+    if(tl.includes('docente')||tl.includes('ingreso')) edCourse.value='concurso-docente';
+    else if(tl.includes('ascenso')) edCourse.value='ascenso';
+    else if(tl.includes('icfes')||tl.includes('lectura')||tl.includes('razonamiento')) edCourse.value='preicfes';
+    // Set time limit
+    if(data.timeLimit) document.getElementById('ed-time').value=Math.round(data.timeLimit/60);
+  }catch(e){
+    document.getElementById('upload-msg').textContent='❌ Error: '+e.message;
+    console.error(e);
+  }
 }
 
 async function parseHtmlInput(){
-  const html=document.getElementById('html-input').value;
-  if(!html.trim())return alert('Pega el HTML primero.');
-  try{const data=await apiFetch('/upload/html-parse',{method:'POST',body:JSON.stringify({html})});editorData=data;openEditor('Simulacro desde HTML');}
-  catch(e){alert('Error: '+e.message);}
+  const htmlContent=document.getElementById('html-input').value;
+  if(!htmlContent.trim())return alert('Pega el contenido HTML primero.');
+  const prog=document.getElementById('upload-progress');
+  prog.style.display='block';
+  document.getElementById('upload-msg').textContent='Procesando HTML...';
+  // Switch to file tab area to show progress (stays in html utab but progress is shared)
+  try{
+    const data=await apiFetch('/upload/html-parse',{method:'POST',body:JSON.stringify({html:htmlContent})});
+    const qCount=data.totalQuestions||0;
+    document.getElementById('upload-msg').textContent='✅ '+qCount+' preguntas encontradas.';
+    editorData=data;
+    const title=data.title||'Simulacro desde HTML';
+    openEditor(title);
+    if(data.timeLimit) document.getElementById('ed-time').value=Math.round(data.timeLimit/60);
+    const tl=title.toLowerCase();
+    const ec=document.getElementById('ed-course');
+    if(tl.includes('docente')||tl.includes('ingreso'))ec.value='concurso-docente';
+    else if(tl.includes('ascenso'))ec.value='ascenso';
+    else if(tl.includes('icfes')||tl.includes('lectura')||tl.includes('razonamiento'))ec.value='preicfes';
+  }catch(e){
+    document.getElementById('upload-msg').textContent='❌ Error: '+e.message;
+    alert('Error al procesar: '+e.message);
+  }
 }
 
 function createManualSim(){
@@ -669,14 +724,14 @@ function createManualSim(){
   document.getElementById('ed-title').value=gv('man-title')||'Nuevo Simulacro';
   document.getElementById('ed-course').value=gv('man-course');
   document.getElementById('ed-time').value=gv('man-time')||100;
-  document.getElementById('sim-editor').classList.remove('hidden');
+  document.getElementById('sim-editor').style.display='block';
   renderEditor();
 }
 function openEditor(title){
   document.getElementById('ed-title').value=title||'Simulacro';
   document.getElementById('ed-course').value='concurso-docente';
   document.getElementById('ed-time').value=100;
-  document.getElementById('sim-editor').classList.remove('hidden');
+  document.getElementById('sim-editor').style.display='block';
   renderEditor();
   setTimeout(()=>document.getElementById('sim-editor').scrollIntoView({behavior:'smooth'}),100);
 }
