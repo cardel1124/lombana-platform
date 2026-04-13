@@ -369,6 +369,57 @@ app.delete('/api/simulacros/:id', adminOnly, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Error al eliminar' }); }
 });
 
+// ─── REBUILD: update header + replace all situations/questions/options ───
+app.put('/api/simulacros/:id/rebuild', adminOnly, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { title, description, course, time_limit, situations } = req.body;
+    if (!title || !course) return res.status(400).json({ error: 'Título y curso son obligatorios' });
+
+    // Update header
+    await client.query(
+      'UPDATE simulacros SET title=$1, description=$2, course=$3, time_limit=$4, updated_at=NOW() WHERE id=$5',
+      [title, description || null, course, parseInt(time_limit) || 6000, req.params.id]
+    );
+
+    // Delete all existing content (cascade deletes questions, options, answers in results are kept)
+    await client.query('DELETE FROM situations WHERE simulacro_id=$1', [req.params.id]);
+
+    // Recreate
+    let totalQ = 0;
+    for (let si = 0; si < (situations || []).length; si++) {
+      const sit = situations[si];
+      const sitR = await client.query(
+        'INSERT INTO situations (simulacro_id, order_num, context, label, image_url) VALUES ($1,$2,$3,$4,$5) RETURNING id',
+        [req.params.id, si + 1, sit.context || '', sit.label || `Situación ${si + 1}`, sit.image_url || null]
+      );
+      const sitId = sitR.rows[0].id;
+      for (let qi = 0; qi < (sit.questions || []).length; qi++) {
+        const q = sit.questions[qi];
+        const qR = await client.query(
+          'INSERT INTO questions (situation_id, simulacro_id, order_num, text, correct_answer, image_url) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+          [sitId, req.params.id, qi + 1, q.text || '', (q.correct_answer || 'A').toUpperCase(), q.image_url || null]
+        );
+        totalQ++;
+        for (const opt of (q.options || [])) {
+          await client.query(
+            'INSERT INTO options (question_id, key, text, image_url) VALUES ($1,$2,$3,$4)',
+            [qR.rows[0].id, opt.key.toUpperCase(), opt.text || '', opt.image_url || null]
+          );
+        }
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true, totalQuestions: totalQ });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('rebuild:', err);
+    res.status(500).json({ error: 'Error al actualizar: ' + err.message });
+  } finally { client.release(); }
+});
+
 // ═══════════════════════════════════════════════════
 // UPLOAD & PARSE
 // ═══════════════════════════════════════════════════
