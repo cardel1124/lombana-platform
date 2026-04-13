@@ -57,7 +57,7 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => cb(null, uuidv4() + path.extname(file.originalname).toLowerCase())
 });
-const upload = multer({ storage, limits: { fileSize: 30 * 1024 * 1024 } }); // 30MB
+const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } });
 
 // ═══════════════════════════════════════════════════
 // AUTH MIDDLEWARE
@@ -376,8 +376,8 @@ app.post('/api/upload/simulacro', adminOnly, upload.single('file'), async (req, 
   try {
     if (!req.file) return res.status(400).json({ error: 'No se recibió archivo' });
     const ext = path.extname(req.file.originalname).toLowerCase();
-    const allowed = ['.pdf', '.docx', '.doc', '.html', '.htm'];
-    if (!allowed.includes(ext)) return res.status(400).json({ error: 'Formato no soportado. Usa PDF, DOCX o HTML.' });
+    const allowed = ['.pdf', '.docx', '.doc', '.html', '.htm', '.zip'];
+    if (!allowed.includes(ext)) return res.status(400).json({ error: 'Formato no soportado. Usa PDF, DOCX, HTML o ZIP.' });
     const parsed = await parseFile(req.file.path, ext);
     res.json(parsed);
   } catch (err) {
