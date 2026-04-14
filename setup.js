@@ -35,6 +35,11 @@ async function run() {
 
   // 2. Create admin
   const adminDoc = 'admin';
+  const adminName = 'Carlos Daniel Duran';
+  const adminEmail = 'delaossa1991@gmail.com';
+  const adminPass = 'lombana2026';
+
+  const adminDoc = 'mauro';
   const adminName = 'Mauro Lombana Gomez';
   const adminEmail = 'mauro.norssate@gmail.com';
   const adminPass = 'lombana2026';
