@@ -35,8 +35,8 @@ async function run() {
 
   // 2. Create admin
   const adminDoc = 'admin';
-  const adminName = 'Carlos Daniel Duran';
-  const adminEmail = 'delaossa1991@gmail.com';
+  const adminName = 'Mauro Lombana Gómez';
+  const adminEmail = 'mauro.norssate@gmail.com';
   const adminPass = 'lombana2026';
 
   if (adminPass.length < 6) { console.log('❌ Contraseña muy corta.'); process.exit(1); }
