@@ -544,7 +544,7 @@ function renderExam(){
   let html='';
   let qTotal=0;
   examSim.situations.forEach(sit=>{
-    html+=`<div class="sit-box"><div class="sit-lbl">SITUACIÓN · ${sit.label||''}</div><div class="sit-ctx">${sit.context||''}</div></div>`;
+  html+=`<div class="sit-box"><div class="sit-lbl">SITUACIÓN · ${sit.label||''}</div>${sit.image_url ? `<img src="${sit.image_url}" class="q-img" style="margin-bottom:12px" alt="Contexto">` : ''}<div class="sit-ctx">${sit.context||''}</div></div>`;
     sit.questions.forEach((q,qi)=>{
       qTotal++;
       html+=`<div class="q-block" id="qb-${q.id}">
