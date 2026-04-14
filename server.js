@@ -13,6 +13,7 @@ const { v4: uuidv4 } = require('uuid');
 const { parseFile, parseHtmlContent } = require('./utils/parser');
 
 const app  = express();
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'lombana-secret-change-in-production-2026';
 
@@ -25,6 +26,7 @@ const pool = new Pool({
 });
 
 pool.on('error', (err) => console.error('DB error:', err));
+pool.query('ALTER TABLE situations ADD COLUMN image_url VARCHAR(800);').catch(e => {});
 pool.query('ALTER TABLE simulacros DROP COLUMN IF EXISTS created_by, DROP COLUMN IF EXISTS school_id;').then(() => pool.query('ALTER TABLE simulacros ADD COLUMN created_by UUID, ADD COLUMN school_id UUID;')).catch(e => {});
 async function query(text, params) {
   const client = await pool.connect();
