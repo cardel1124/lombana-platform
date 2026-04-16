@@ -66,8 +66,16 @@ CREATE TABLE IF NOT EXISTS situations (
   order_num        INT          NOT NULL,
   context          TEXT,
   label            VARCHAR(300),
+  image_url        VARCHAR(600),
   created_at       TIMESTAMP    DEFAULT NOW()
 );
+
+-- Migration: add image_url to situations if not exists
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='situations' AND column_name='image_url') THEN
+    ALTER TABLE situations ADD COLUMN image_url VARCHAR(600);
+  END IF;
+END $$;
 
 -- ─── QUESTIONS ──────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS questions (
@@ -125,6 +133,43 @@ CREATE TABLE IF NOT EXISTS videos (
   active           BOOLEAN      DEFAULT true,
   created_at       TIMESTAMP    DEFAULT NOW()
 );
+
+
+-- ─── DOCUMENTS (Material de apoyo) ──────────────────────────
+CREATE TABLE IF NOT EXISTS documents (
+  id               UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+  title            VARCHAR(300) NOT NULL,
+  description      TEXT,
+  course           VARCHAR(50)  DEFAULT 'all',
+  category         VARCHAR(50)  DEFAULT 'guia',  -- guia, normativa, material, simulacro, otro
+  filename         VARCHAR(300),                  -- original file name
+  file_url         VARCHAR(600) NOT NULL,          -- /uploads/uuid.ext
+  file_size        BIGINT       DEFAULT 0,
+  active           BOOLEAN      DEFAULT true,
+  created_at       TIMESTAMP    DEFAULT NOW(),
+  updated_at       TIMESTAMP    DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_docs_course ON documents(course);
+CREATE INDEX IF NOT EXISTS idx_docs_active ON documents(active);
+
+-- ─── USER CONTENT BLOCKS ─────────────────────────────────────
+-- Bloquear contenido específico por usuario
+CREATE TABLE IF NOT EXISTS user_blocks (
+  id               UUID      PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id          UUID      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  content_type     VARCHAR(20) NOT NULL,   -- 'simulacro' | 'video' | 'documento'
+  content_id       UUID      NOT NULL,
+  created_at       TIMESTAMP DEFAULT NOW(),
+  UNIQUE (user_id, content_type, content_id)
+);
+CREATE INDEX IF NOT EXISTS idx_blocks_user ON user_blocks(user_id);
+
+-- Migration: new users default to inactive (pending admin approval)
+-- Existing users keep their current active status; only NEW registrations start as inactive
+-- (enforced in application code, no schema change needed for existing rows)
+
+
 
 -- ─── INDEXES ────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_users_doc       ON users(doc_num);
