@@ -25,6 +25,10 @@ const pool = new Pool({
 });
 
 pool.on('error', (err) => console.error('DB error:', err));
+pool.query(`
+CREATE TABLE IF NOT EXISTS documents (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), title VARCHAR(300) NOT NULL, description TEXT, course VARCHAR(50) DEFAULT 'all', category VARCHAR(50) DEFAULT 'guia', filename VARCHAR(300), file_url VARCHAR(600) NOT NULL, file_size BIGINT DEFAULT 0, active BOOLEAN DEFAULT true, created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()); 
+CREATE TABLE IF NOT EXISTS user_blocks (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, content_type VARCHAR(20) NOT NULL, content_id UUID NOT NULL, created_at TIMESTAMP DEFAULT NOW(), UNIQUE (user_id, content_type, content_id));
+`).catch(e => console.error(e));
 
 async function query(text, params) {
   const client = await pool.connect();
