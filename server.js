@@ -13,7 +13,6 @@ const { v4: uuidv4 } = require('uuid');
 const { parseFile, parseHtmlContent } = require('./utils/parser');
 
 const app  = express();
-app.set('trust proxy', 1);
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'lombana-secret-change-in-production-2026';
 
@@ -26,8 +25,7 @@ const pool = new Pool({
 });
 
 pool.on('error', (err) => console.error('DB error:', err));
-pool.query('ALTER TABLE situations ADD COLUMN image_url VARCHAR(800);').catch(e => {});
-pool.query('ALTER TABLE simulacros DROP COLUMN IF EXISTS created_by, DROP COLUMN IF EXISTS school_id;').then(() => pool.query('ALTER TABLE simulacros ADD COLUMN created_by UUID, ADD COLUMN school_id UUID;')).catch(e => {});
+
 async function query(text, params) {
   const client = await pool.connect();
   try { return await client.query(text, params); }
@@ -97,13 +95,12 @@ app.post('/api/auth/register', async (req, res) => {
 
     const hash = await bcrypt.hash(password, 12);
     const result = await query(
-      `INSERT INTO users (doc_num, name, email, phone, password_hash, course, school_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, doc_num, name, email, phone, course, role, active, created_at`,
+      `INSERT INTO users (doc_num, name, email, phone, password_hash, course, school_id, active)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,false) RETURNING id, doc_num, name, email, phone, course, role, active, created_at`,
       [doc_num.trim(), name.trim(), email.trim().toLowerCase(), phone.trim(), hash, course, school_id || null]
     );
-    const user = result.rows[0];
-    const token = jwt.sign({ id: user.id, role: user.role, course: user.course }, JWT_SECRET, { expiresIn: '7d' });
-    res.status(201).json({ token, user });
+    // New users are PENDING until admin activates them
+    res.status(201).json({ pending: true, message: 'Registro exitoso. Tu cuenta está pendiente de activación por el administrador. Recibirás acceso pronto.' });
   } catch (err) {
     console.error('register:', err);
     res.status(500).json({ error: 'Error al registrar. Intenta de nuevo.' });
@@ -117,7 +114,7 @@ app.post('/api/auth/login', async (req, res) => {
     const result = await query('SELECT * FROM users WHERE doc_num=$1', [doc_num.trim()]);
     if (!result.rows.length) return res.status(400).json({ error: 'Credenciales inválidas' });
     const user = result.rows[0];
-    if (!user.active) return res.status(403).json({ error: 'Cuenta suspendida. Contacta al administrador.' });
+    if (!user.active) return res.status(403).json({ error: 'PENDIENTE', message: 'Tu cuenta está pendiente de activación. El administrador la habilitará pronto.' });
     if (!await bcrypt.compare(password, user.password_hash)) return res.status(400).json({ error: 'Credenciales inválidas' });
     await query('UPDATE users SET last_login=NOW() WHERE id=$1', [user.id]);
     const { password_hash, ...safe } = user;
@@ -281,7 +278,12 @@ app.get('/api/simulacros', auth, async (req, res) => {
              LEFT JOIN questions q ON q.simulacro_id=s.id
              WHERE 1=1`;
     const p = []; let i = 1;
-    if (!isAdmin) { q += ` AND s.active=true AND (s.course=$${i++} OR s.course='all')`; p.push(req.user.course); }
+    if (!isAdmin) {
+      q += ` AND s.active=true AND (s.course=$${i++} OR s.course='all')`;
+      p.push(req.user.course);
+      q += ` AND s.id NOT IN (SELECT content_id FROM user_blocks WHERE user_id=$${i++} AND content_type='simulacro')`;
+      p.push(req.user.id);
+    }
     if (course && isAdmin) { q += ` AND s.course=$${i++}`; p.push(course); }
     q += ' GROUP BY s.id ORDER BY s.created_at DESC';
     const r = await query(q, p);
@@ -635,7 +637,12 @@ app.get('/api/videos', auth, async (req, res) => {
     const isAdmin = req.user.role === 'admin';
     let q = 'SELECT * FROM videos WHERE active=true';
     const p = [];
-    if (!isAdmin) { q += " AND (course=$1 OR course='all')"; p.push(req.user.course); }
+    if (!isAdmin) {
+      q += " AND (course=$1 OR course='all') AND active=true";
+      p.push(req.user.course);
+      q += ` AND id NOT IN (SELECT content_id FROM user_blocks WHERE user_id=$2 AND content_type='video')`;
+      p.push(req.user.id);
+    }
     q += ' ORDER BY created_at DESC';
     const r = await query(q, p);
     res.json(r.rows);
@@ -681,6 +688,135 @@ app.put('/api/admin/password', adminOnly, async (req, res) => {
     const hash = await bcrypt.hash(new_password, 12);
     await query('UPDATE users SET password_hash=$1 WHERE id=$2', [hash, req.user.id]);
     res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: 'Error' }); }
+});
+
+
+// ═══════════════════════════════════════════════════
+// DOCUMENTS
+// ═══════════════════════════════════════════════════
+
+// Student/public: GET available documents for their course
+app.get('/api/documents', auth, async (req, res) => {
+  try {
+    const { course } = req.query;
+    const isAdmin = req.user.role === 'admin';
+    let q = `SELECT * FROM documents WHERE 1=1`;
+    const p = []; let i = 1;
+    if (!isAdmin) {
+      q += ` AND active=true AND (course=$${i++} OR course='all')`;
+      p.push(req.user.course);
+      q += ` AND id NOT IN (SELECT content_id FROM user_blocks WHERE user_id=$${i++} AND content_type='documento')`;
+      p.push(req.user.id);
+    }
+    if (course && isAdmin) { q += ` AND course=$${i++}`; p.push(course); }
+    q += ' ORDER BY created_at DESC';
+    const r = await query(q, p);
+    res.json(r.rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Error' }); }
+});
+
+// Upload document file + metadata
+app.post('/api/documents/upload', adminOnly, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No se recibió archivo' });
+    const allowed = ['.pdf','.doc','.docx','.pptx','.ppt'];
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    if (!allowed.includes(ext)) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'Formato no permitido. Usa PDF, DOC, DOCX o PPTX.' });
+    }
+    const { title, description, course, category } = req.body;
+    if (!title) return res.status(400).json({ error: 'El título es obligatorio' });
+    const fileUrl = '/uploads/' + req.file.filename;
+    const r = await query(
+      `INSERT INTO documents (title, description, course, category, filename, file_url, file_size)
+       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [title, description||null, course||'all', category||'guia',
+       req.file.originalname, fileUrl, req.file.size]
+    );
+    res.status(201).json(r.rows[0]);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Error al subir documento: ' + err.message }); }
+});
+
+// Update document metadata (title, desc, course, category, active)
+app.put('/api/documents/:id', adminOnly, async (req, res) => {
+  try {
+    const { title, description, course, category, active } = req.body;
+    await query(
+      `UPDATE documents SET title=$1, description=$2, course=$3, category=$4,
+       active=COALESCE($5,active), updated_at=NOW() WHERE id=$6`,
+      [title, description||null, course, category||'guia',
+       active !== undefined ? active : null, req.params.id]
+    );
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: 'Error al actualizar' }); }
+});
+
+// Delete document (also removes file)
+app.delete('/api/documents/:id', adminOnly, async (req, res) => {
+  try {
+    const r = await query('SELECT file_url FROM documents WHERE id=$1', [req.params.id]);
+    if (r.rows.length) {
+      const filePath = path.join(__dirname, 'public', r.rows[0].file_url);
+      try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch {}
+    }
+    await query('DELETE FROM documents WHERE id=$1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: 'Error al eliminar' }); }
+});
+
+
+// ═══════════════════════════════════════════════════
+// USER CONTENT BLOCKS
+// ═══════════════════════════════════════════════════
+
+// Get all blocks for a user
+app.get('/api/users/:id/blocks', adminOnly, async (req, res) => {
+  try {
+    const r = await query('SELECT * FROM user_blocks WHERE user_id=$1', [req.params.id]);
+    res.json(r.rows);
+  } catch (err) { res.status(500).json({ error: 'Error' }); }
+});
+
+// Set blocks for a user (replaces all)
+app.put('/api/users/:id/blocks', adminOnly, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM user_blocks WHERE user_id=$1', [req.params.id]);
+    const { blocks } = req.body; // [{ content_type, content_id }]
+    for (const b of (blocks || [])) {
+      await client.query(
+        'INSERT INTO user_blocks (user_id, content_type, content_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING',
+        [req.params.id, b.content_type, b.content_id]
+      );
+    }
+    await client.query('COMMIT');
+    res.json({ success: true });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: 'Error al guardar bloqueos' });
+  } finally { client.release(); }
+});
+
+// Toggle single block
+app.post('/api/users/:id/blocks/toggle', adminOnly, async (req, res) => {
+  try {
+    const { content_type, content_id } = req.body;
+    const exists = await query(
+      'SELECT id FROM user_blocks WHERE user_id=$1 AND content_type=$2 AND content_id=$3',
+      [req.params.id, content_type, content_id]
+    );
+    if (exists.rows.length) {
+      await query('DELETE FROM user_blocks WHERE user_id=$1 AND content_type=$2 AND content_id=$3',
+        [req.params.id, content_type, content_id]);
+      res.json({ blocked: false });
+    } else {
+      await query('INSERT INTO user_blocks (user_id, content_type, content_id) VALUES ($1,$2,$3)',
+        [req.params.id, content_type, content_id]);
+      res.json({ blocked: true });
+    }
   } catch (err) { res.status(500).json({ error: 'Error' }); }
 });
 
