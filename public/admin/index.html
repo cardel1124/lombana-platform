@@ -128,6 +128,7 @@ tbody tr:hover{background:var(--g50)}
   <div class="nav-item" data-page="instituciones" onclick="navigate('instituciones',this)"><span class="ic">🏫</span> Instituciones</div>
   <div class="nav-item" data-page="simulacros" onclick="navigate('simulacros',this)"><span class="ic">📝</span> Simulacros</div>
   <div class="nav-item" data-page="videos" onclick="navigate('videos',this)"><span class="ic">🎬</span> Videos</div>
+  <div class="nav-item" data-page="documentos" onclick="navigate('documentos',this)"><span class="ic">📄</span> Documentos</div>
   <div class="sidebar-section">Sistema</div>
   <div class="nav-item" data-page="config" onclick="navigate('config',this)"><span class="ic">⚙</span> Configuración</div>
   <div class="nav-item" onclick="adminLogout()" style="color:rgba(239,68,68,.7);margin-top:12px"><span class="ic">🚪</span> Cerrar Sesión</div>
@@ -193,6 +194,12 @@ tbody tr:hover{background:var(--g50)}
       </select>
     </div>
   </div>
+  <div class="flex gap-2 mb-2" style="flex-wrap:wrap">
+    <button class="btn btn-ghost btn-sm" id="uf-all"   onclick="setUserFilter('all')"   style="border-color:var(--gold);color:var(--gold-d)">Todos</button>
+    <button class="btn btn-ghost btn-sm" id="uf-pend"  onclick="setUserFilter('pending')">⏳ Pendientes</button>
+    <button class="btn btn-ghost btn-sm" id="uf-act"   onclick="setUserFilter('active')">✅ Activos</button>
+    <button class="btn btn-ghost btn-sm" id="uf-block" onclick="setUserFilter('blocked')">🚫 Bloqueados</button>
+  </div>
   <div class="tbl-wrap"><table><thead><tr><th>Documento</th><th>Nombre</th><th>Correo</th><th>Curso</th><th>Intentos</th><th>Promedio</th><th>Estado</th><th>Acciones</th></tr></thead><tbody id="users-tbody"></tbody></table></div>
 </div>
 
@@ -217,6 +224,27 @@ tbody tr:hover{background:var(--g50)}
   <div id="videos-list"></div>
 </div>
 
+<div id="page-documentos" class="page">
+  <div class="flex justify-between items-center mb-3 gap-2">
+    <h2 style="font-size:1.4rem;color:var(--navy)">Documentos de Apoyo</h2>
+    <button class="btn btn-gold" onclick="openDocModal()">+ Subir Documento</button>
+  </div>
+  <div class="card mb-3" style="padding:14px">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <select id="doc-filter-course" class="form-control" style="max-width:220px" onchange="loadDocs()">
+        <option value="">Todos los cursos</option>
+        <option value="concurso-docente">Concurso Docente</option>
+        <option value="ascenso">Ascenso</option>
+        <option value="preicfes">Pre-ICFES</option>
+        <option value="colegio">Colegio</option>
+        <option value="all">Todos</option>
+      </select>
+      <input id="doc-search" class="form-control" style="max-width:240px" placeholder="🔍 Buscar documento..." oninput="loadDocs()">
+    </div>
+  </div>
+  <div id="docs-list"></div>
+</div>
+
 <div id="page-config" class="page">
   <h2 style="font-size:1.4rem;color:var(--navy);margin-bottom:20px">Configuración</h2>
   <div class="grid-2" style="max-width:800px">
@@ -232,6 +260,81 @@ tbody tr:hover{background:var(--g50)}
   </div>
 </div>
 
+</div>
+</div>
+
+
+<!-- Blocks Modal -->
+<div id="blocks-modal" class="modal-ov hidden">
+<div class="modal-box" style="max-width:680px">
+  <h3 class="modal-title" id="blocks-modal-title">🔒 Gestión de Accesos</h3>
+  <p style="color:var(--g600);font-size:.85rem;margin-bottom:18px">Marca los contenidos a los que este usuario <strong>NO</strong> tendrá acceso. Los demás permanecen disponibles.</p>
+  
+  <div class="tabs" id="blocks-tabs">
+    <div class="tab-btn active" onclick="switchBlocksTab('simulacros',this)">📝 Simulacros</div>
+    <div class="tab-btn" onclick="switchBlocksTab('videos',this)">🎬 Videos</div>
+    <div class="tab-btn" onclick="switchBlocksTab('documentos',this)">📄 Documentos</div>
+  </div>
+
+  <div id="btab-simulacros" class="tab-content active" style="max-height:340px;overflow-y:auto"></div>
+  <div id="btab-videos"     class="tab-content" style="max-height:340px;overflow-y:auto;display:none"></div>
+  <div id="btab-documentos" class="tab-content" style="max-height:340px;overflow-y:auto;display:none"></div>
+
+  <div id="blocks-alert" style="margin-top:12px"></div>
+  <div style="display:flex;gap:10px;margin-top:16px">
+    <button class="btn btn-ghost" onclick="closeBlocksModal()">Cerrar</button>
+    <button class="btn btn-gold" onclick="saveBlocks()">💾 Guardar Cambios</button>
+  </div>
+</div>
+</div>
+
+<!-- Document Modal -->
+<div id="doc-modal" class="modal-ov hidden">
+<div class="modal-box" style="max-width:520px">
+  <h3 class="modal-title" id="doc-modal-title">📄 Subir Documento</h3>
+  <input type="hidden" id="doc-edit-id">
+  <div class="form-group"><label class="form-label">Título del documento *</label><input id="doc-title" class="form-control" placeholder="Ej: Guía estudio Decreto 1278..."></div>
+  <div class="form-group"><label class="form-label">Descripción</label><textarea id="doc-desc" class="form-control" rows="2" placeholder="Tema, páginas, autor..."></textarea></div>
+  <div class="grid-2">
+    <div class="form-group"><label class="form-label">Curso</label>
+      <select id="doc-course" class="form-control">
+        <option value="all">Todos los cursos</option>
+        <option value="concurso-docente">Concurso Docente</option>
+        <option value="ascenso">Ascenso</option>
+        <option value="preicfes">Pre-ICFES</option>
+        <option value="colegio">Colegio</option>
+      </select>
+    </div>
+    <div class="form-group"><label class="form-label">Categoría</label>
+      <select id="doc-category" class="form-control">
+        <option value="guia">Guía de estudio</option>
+        <option value="normativa">Normativa / Decreto</option>
+        <option value="material">Material de clase</option>
+        <option value="simulacro">Simulacro imprimible</option>
+        <option value="otro">Otro</option>
+      </select>
+    </div>
+  </div>
+  <div id="doc-file-wrap" class="form-group">
+    <label class="form-label">Archivo (PDF, DOC, DOCX, PPTX) *</label>
+    <div class="upload-area" style="padding:20px" onclick="document.getElementById('doc-file-input').click()">
+      <div style="font-size:1.8rem;margin-bottom:6px">📎</div>
+      <p style="font-size:.85rem;color:var(--g600)" id="doc-file-name">Clic para seleccionar o arrastra el archivo</p>
+      <p style="font-size:.75rem;color:var(--g400);margin-top:3px">PDF · DOC · DOCX · PPTX · Máx 30 MB</p>
+      <input id="doc-file-input" type="file" accept=".pdf,.doc,.docx,.pptx,.ppt" class="hidden" onchange="handleDocFile(this)">
+    </div>
+  </div>
+  <div id="doc-progress" style="display:none;margin-bottom:10px">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="width:18px;height:18px;border:3px solid var(--g200);border-top-color:var(--gold);border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0"></div>
+      <span id="doc-progress-msg" style="font-size:.85rem;color:var(--g600)">Subiendo...</span>
+    </div>
+  </div>
+  <div id="doc-alert"></div>
+  <div style="display:flex;gap:10px;margin-top:14px">
+    <button class="btn btn-ghost" onclick="closeDocModal()">Cancelar</button>
+    <button class="btn btn-gold" id="doc-save-btn" onclick="saveDoc()">Guardar</button>
+  </div>
 </div>
 </div>
 
@@ -451,6 +554,7 @@ function navigate(page,el){
   if(page==='instituciones')loadSchools();
   if(page==='simulacros')loadSimulacros();
   if(page==='videos')loadVideos();
+  if(page==='documentos')loadDocs();
   if(page==='config')loadConfig();
 }
 
@@ -544,10 +648,14 @@ async function loadStudentPerf(uid){
 async function loadUsers(){
   const search=gv('u-search'),course=gv('u-course');
   try{
-    const p=new URLSearchParams({page:1,limit:100});
+    const p=new URLSearchParams({page:1,limit:500});
     if(search)p.append('search',search);if(course)p.append('course',course);
     const d=await apiFetch('/users?'+p);
     allUsersCache=d.users||[];
+    // Apply active/pending/blocked filter
+    if(userFilter==='pending')  allUsersCache=allUsersCache.filter(u=>!u.active&&!u.last_login);
+    else if(userFilter==='active')  allUsersCache=allUsersCache.filter(u=>u.active);
+    else if(userFilter==='blocked') allUsersCache=allUsersCache.filter(u=>!u.active&&u.last_login);
     const tbody=document.getElementById('users-tbody');
     if(!allUsersCache.length){tbody.innerHTML='<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--g400)">Sin resultados</td></tr>';return;}
     tbody.innerHTML=allUsersCache.map(u=>`<tr>
@@ -557,10 +665,12 @@ async function loadUsers(){
       <td><span class="badge badge-info" style="font-size:.68rem">${CN[u.course]||u.course}</span></td>
       <td style="text-align:center">${u.attempts||0}</td>
       <td><strong style="color:${parseFloat(u.avg_score)>=70?'var(--ok)':'var(--err)'}">${parseFloat(u.avg_score||0).toFixed(1)}</strong></td>
-      <td><span class="badge ${u.active?'badge-ok':'badge-err'}">${u.active?'Activo':'Bloqueado'}</span></td>
+      <td>${u.active ? '<span class=\"badge badge-ok\">Activo</span>' : (u.last_login ? '<span class=\"badge badge-err\">Bloqueado</span>' : '<span class=\"badge badge-warn\">⏳ Pendiente</span>')}</td>
       <td><div style="display:flex;gap:5px">
         <button class="btn btn-ghost btn-xs" onclick='openUserModal(${JSON.stringify(u)})'>✏</button>
         <button class="btn btn-xs ${u.active?'btn-err':'btn-ok'}" onclick="toggleUser('${u.id}',${!u.active})">${u.active?'Bloquear':'Activar'}</button>
+        <button class="btn btn-navy btn-xs" onclick="openBlocksModal('${u.id}','${u.name.replace(/'/g,'')}')">🔒 Accesos</button>
+        <button class="btn btn-err btn-xs" onclick="deleteUser('${u.id}','${u.name.replace(/'/g,'')}')">🗑</button>
       </div></td></tr>`).join('');
   }catch(e){console.error(e);}
 }
@@ -581,6 +691,10 @@ async function saveUser(){
 async function toggleUser(id,active){
   const u=allUsersCache.find(u=>u.id===id);if(!u)return;
   try{await apiFetch('/users/'+id,{method:'PUT',body:JSON.stringify({...u,active})});loadUsers();}catch(e){alert(e.message);}
+}
+async function deleteUser(id,name){
+  if(!confirm('¿Eliminar definitivamente a "'+name+'"?\nEsta acción borrará su cuenta y todos sus resultados.'))return;
+  try{await apiFetch('/users/'+id,{method:'DELETE'});loadUsers();}catch(e){alert('Error: '+e.message);}
 }
 function exportUsers(){window.open(API+'/users/export','_blank');}
 
@@ -912,6 +1026,279 @@ function showAlert(id,t,msg){const m={ok:'alert-ok',err:'alert-err',warn:'alert-
 function clearAlert(id){const e=document.getElementById(id);if(e)e.innerHTML='';}
 function sbadge(s){return s>=85?'badge-ok':s>=70?'badge-info':s>=50?'badge-warn':'badge-err';}
 function esc(t){return String(t||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+// ══════════════════════════════════════════════
+//  DOCUMENTOS DE APOYO
+// ══════════════════════════════════════════════
+const DOC_CAT = {guia:'Guía de estudio',normativa:'Normativa',material:'Material de clase',simulacro:'Simulacro',otro:'Otro'};
+const DOC_ICONS = {pdf:'📕',doc:'📘',docx:'📘',pptx:'📙',ppt:'📙',default:'📄'};
+let docFileSelected = null;
+
+async function loadDocs(){
+  const el = document.getElementById('docs-list');
+  const course = gv('doc-filter-course');
+  const search = gv('doc-search').toLowerCase();
+  el.innerHTML = '<p style="color:var(--g400);padding:16px">Cargando...</p>';
+  try{
+    const data = await apiFetch('/documents' + (course ? '?course='+course : ''));
+    const filtered = data.filter(d =>
+      !search || d.title.toLowerCase().includes(search) || (d.description||'').toLowerCase().includes(search)
+    );
+    if(!filtered.length){
+      el.innerHTML='<div class="empty-state"><div class="ei">📄</div><p>No hay documentos. Sube el primero.</p></div>';
+      return;
+    }
+    el.innerHTML = '<div class="tbl-wrap"><table><thead><tr><th>Documento</th><th>Categoría</th><th>Curso</th><th>Tamaño</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>'+
+      filtered.map(d => {
+        const ext = (d.filename||'').split('.').pop().toLowerCase();
+        const icon = DOC_ICONS[ext] || DOC_ICONS.default;
+        const size = d.file_size ? (d.file_size/1024>1024 ? (d.file_size/1048576).toFixed(1)+' MB' : Math.round(d.file_size/1024)+' KB') : '—';
+        return `<tr>
+          <td>
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:1.5rem">${icon}</span>
+              <div>
+                <div style="font-weight:600;font-size:.88rem">${d.title}</div>
+                <div style="font-size:.73rem;color:var(--g400)">${d.description||''}</div>
+              </div>
+            </div>
+          </td>
+          <td><span class="badge badge-gold" style="font-size:.68rem">${DOC_CAT[d.category]||d.category||'—'}</span></td>
+          <td><span class="badge badge-info" style="font-size:.68rem">${CN[d.course]||d.course}</span></td>
+          <td style="font-size:.79rem">${size}</td>
+          <td><span class="badge ${d.active?'badge-ok':'badge-err'}">${d.active?'Activo':'Inactivo'}</span></td>
+          <td>
+            <div style="display:flex;gap:5px">
+              <a href="${d.file_url}" target="_blank" class="btn btn-ghost btn-xs">⬇</a>
+              <button class="btn btn-ghost btn-xs" onclick="editDoc(${JSON.stringify(d).replace(/"/g,'&quot;')})">✏</button>
+              <button class="btn btn-xs ${d.active?'btn-err':'btn-ok'}" onclick="toggleDoc('${d.id}',${!d.active})">${d.active?'Ocultar':'Mostrar'}</button>
+              <button class="btn btn-err btn-xs" onclick="deleteDoc('${d.id}','${d.title.replace(/'/g,'')}')">🗑</button>
+            </div>
+          </td>
+        </tr>`;
+      }).join('') + '</tbody></table></div>';
+  }catch(e){el.innerHTML='<div class="alert alert-err">'+e.message+'</div>';}
+}
+
+function openDocModal(){
+  document.getElementById('doc-modal-title').textContent='📄 Subir Documento';
+  document.getElementById('doc-edit-id').value='';
+  ['doc-title','doc-desc'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('doc-course').value='all';
+  document.getElementById('doc-category').value='guia';
+  document.getElementById('doc-file-name').textContent='Clic para seleccionar o arrastra el archivo';
+  document.getElementById('doc-file-wrap').style.display='block';
+  document.getElementById('doc-progress').style.display='none';
+  docFileSelected=null;
+  clearAlert('doc-alert');
+  document.getElementById('doc-modal').classList.remove('hidden');
+}
+
+function editDoc(d){
+  document.getElementById('doc-modal-title').textContent='✏ Editar Documento';
+  document.getElementById('doc-edit-id').value=d.id;
+  document.getElementById('doc-title').value=d.title;
+  document.getElementById('doc-desc').value=d.description||'';
+  document.getElementById('doc-course').value=d.course;
+  document.getElementById('doc-category').value=d.category||'guia';
+  document.getElementById('doc-file-wrap').style.display='none'; // no re-upload needed
+  document.getElementById('doc-progress').style.display='none';
+  docFileSelected=null;
+  clearAlert('doc-alert');
+  document.getElementById('doc-modal').classList.remove('hidden');
+}
+
+function closeDocModal(){
+  document.getElementById('doc-modal').classList.add('hidden');
+  docFileSelected=null;
+}
+
+function handleDocFile(input){
+  if(input.files[0]){
+    docFileSelected=input.files[0];
+    document.getElementById('doc-file-name').textContent='✅ '+docFileSelected.name+' ('+Math.round(docFileSelected.size/1024)+' KB)';
+  }
+}
+
+async function saveDoc(){
+  const id = document.getElementById('doc-edit-id').value;
+  const title = gv('doc-title');
+  const desc = gv('doc-desc');
+  const course = gv('doc-course');
+  const category = gv('doc-category');
+  clearAlert('doc-alert');
+
+  if(!title) return showAlert('doc-alert','err','El título es obligatorio.');
+
+  // EDIT mode (no file needed)
+  if(id){
+    try{
+      await apiFetch('/documents/'+id,{method:'PUT',body:JSON.stringify({title,description:desc,course,category})});
+      closeDocModal(); loadDocs();
+    }catch(e){showAlert('doc-alert','err',e.message);}
+    return;
+  }
+
+  // CREATE mode — need file
+  if(!docFileSelected) return showAlert('doc-alert','err','Selecciona un archivo.');
+
+  const prog = document.getElementById('doc-progress');
+  prog.style.display='block';
+  document.getElementById('doc-progress-msg').textContent='Subiendo archivo...';
+  document.getElementById('doc-save-btn').disabled=true;
+
+  try{
+    const fd = new FormData();
+    fd.append('file', docFileSelected);
+    fd.append('title', title);
+    fd.append('description', desc);
+    fd.append('course', course);
+    fd.append('category', category);
+    const data = await apiUpload('/documents/upload', fd);
+    prog.style.display='none';
+    document.getElementById('doc-save-btn').disabled=false;
+    showAlert('doc-alert','ok','✅ Documento subido correctamente.');
+    setTimeout(()=>{closeDocModal();loadDocs();},1000);
+  }catch(e){
+    prog.style.display='none';
+    document.getElementById('doc-save-btn').disabled=false;
+    showAlert('doc-alert','err','Error: '+e.message);
+  }
+}
+
+async function toggleDoc(id,active){
+  try{await apiFetch('/documents/'+id,{method:'PUT',body:JSON.stringify({active})});loadDocs();}
+  catch(e){alert(e.message);}
+}
+
+async function deleteDoc(id,title){
+  if(!confirm('¿Eliminar "'+title+'"?')) return;
+  try{await apiFetch('/documents/'+id,{method:'DELETE'});loadDocs();}
+  catch(e){alert(e.message);}
+}
+
+
+// ══════════════════════════════════════════════
+//  USER FILTER (Todos / Pendientes / Activos / Bloqueados)
+// ══════════════════════════════════════════════
+let userFilter = 'all';
+function setUserFilter(f){
+  userFilter = f;
+  // Visual feedback
+  ['all','pend','act','block'].forEach(id => {
+    const btn = document.getElementById('uf-'+id);
+    if(!btn) return;
+    btn.style.borderColor = '';
+    btn.style.color = '';
+    btn.style.background = '';
+  });
+  const map = {all:'uf-all',pending:'uf-pend',active:'uf-act',blocked:'uf-block'};
+  const activeBtn = document.getElementById(map[f]);
+  if(activeBtn){ activeBtn.style.background='var(--gold)'; activeBtn.style.color='var(--navy)'; }
+  loadUsers();
+}
+
+// ══════════════════════════════════════════════
+//  CONTENT BLOCKS MODAL
+// ══════════════════════════════════════════════
+let blocksUserId = null;
+let blocksUserName = '';
+let currentBlocksTab = 'simulacros';
+let allBlockedIds = new Set();  // "type:id"
+
+async function openBlocksModal(uid, name){
+  blocksUserId = uid;
+  blocksUserName = name;
+  allBlockedIds = new Set();
+  document.getElementById('blocks-modal-title').textContent = '🔒 Accesos — ' + name;
+  clearAlert('blocks-alert');
+  document.getElementById('blocks-modal').classList.remove('hidden');
+  // Load existing blocks
+  try{
+    const blocks = await apiFetch('/users/'+uid+'/blocks');
+    blocks.forEach(b => allBlockedIds.add(b.content_type+':'+b.content_id));
+  }catch(e){}
+  // Reset tabs
+  switchBlocksTab('simulacros', document.querySelector('#blocks-tabs .tab-btn'));
+}
+
+function closeBlocksModal(){
+  document.getElementById('blocks-modal').classList.add('hidden');
+  blocksUserId = null;
+}
+
+function switchBlocksTab(tab, el){
+  document.querySelectorAll('#blocks-tabs .tab-btn').forEach(b=>b.classList.remove('active'));
+  if(el) el.classList.add('active');
+  ['simulacros','videos','documentos'].forEach(t=>{
+    const div = document.getElementById('btab-'+t);
+    div.style.display = t===tab ? 'block' : 'none';
+    div.classList.toggle('active', t===tab);
+  });
+  currentBlocksTab = tab;
+  loadBlocksContent(tab);
+}
+
+async function loadBlocksContent(tab){
+  const el = document.getElementById('btab-'+tab);
+  el.innerHTML = '<p style="color:var(--g400);padding:14px">Cargando...</p>';
+  try{
+    const typeMap = {simulacros:'simulacro', videos:'video', documentos:'documento'};
+    const contentType = typeMap[tab];
+    let items = [];
+    if(tab==='simulacros')    items = await apiFetch('/simulacros');
+    else if(tab==='videos')   items = await apiFetch('/videos');
+    else if(tab==='documentos') items = await apiFetch('/documents');
+
+    if(!items.length){ el.innerHTML='<p style="color:var(--g400);padding:14px">No hay '+tab+' disponibles.</p>'; return; }
+
+    el.innerHTML = items.map(item => {
+      const key = contentType+':'+item.id;
+      const isBlocked = allBlockedIds.has(key);
+      const label = item.title || item.name || '—';
+      const sub = item.course ? (CN[item.course]||item.course) : '';
+      return `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--g100);cursor:pointer" onclick="toggleBlock('${contentType}','${item.id}',this)" id="brow-${contentType}-${item.id}">
+        <div style="width:36px;height:36px;border-radius:8px;background:${isBlocked?'#FEE2E2':'#ECFDF5'};display:flex;align-items:center;justify-content:center;font-size:1.2rem;flex-shrink:0">${isBlocked?'🚫':'✅'}</div>
+        <div style="flex:1">
+          <div style="font-weight:600;font-size:.88rem">${label}</div>
+          ${sub ? `<div style="font-size:.75rem;color:var(--g400)">${sub}</div>` : ''}
+        </div>
+        <span style="font-size:.8rem;font-weight:700;color:${isBlocked?'var(--err)':'var(--ok)'}">${isBlocked?'BLOQUEADO':'PERMITIDO'}</span>
+      </div>`;
+    }).join('');
+  }catch(e){ el.innerHTML='<div class="alert alert-err">'+e.message+'</div>'; }
+}
+
+function toggleBlock(contentType, contentId, rowEl){
+  const key = contentType+':'+contentId;
+  if(allBlockedIds.has(key)){
+    allBlockedIds.delete(key);
+    rowEl.querySelector('div:first-child').style.background='#ECFDF5';
+    rowEl.querySelector('div:first-child').textContent='✅';
+    rowEl.querySelector('span').style.color='var(--ok)';
+    rowEl.querySelector('span').textContent='PERMITIDO';
+  } else {
+    allBlockedIds.add(key);
+    rowEl.querySelector('div:first-child').style.background='#FEE2E2';
+    rowEl.querySelector('div:first-child').textContent='🚫';
+    rowEl.querySelector('span').style.color='var(--err)';
+    rowEl.querySelector('span').textContent='BLOQUEADO';
+  }
+}
+
+async function saveBlocks(){
+  if(!blocksUserId) return;
+  clearAlert('blocks-alert');
+  try{
+    const blocks = Array.from(allBlockedIds).map(key => {
+      const [content_type, content_id] = key.split(':');
+      return { content_type, content_id };
+    });
+    await apiFetch('/users/'+blocksUserId+'/blocks',{method:'PUT',body:JSON.stringify({blocks})});
+    showAlert('blocks-alert','ok','✅ Accesos actualizados para '+blocksUserName+'.');
+  }catch(e){ showAlert('blocks-alert','err','Error: '+e.message); }
+}
+
 </script>
 </body>
 </html>
