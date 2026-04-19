@@ -249,6 +249,8 @@ h1,h2,h3,h4{font-family:'Playfair Display',serif}
   <div class="dash-tab active" onclick="switchTab('simulacros',this)">📝 Simulacros</div>
   <div class="dash-tab" onclick="switchTab('videos',this)">🎬 Videos</div>
   <div class="dash-tab" onclick="switchTab('rendimiento',this)">📊 Mi Rendimiento</div>
+  <div class="dash-tab" onclick="switchTab('documentos',this)">📄 Documentos</div>
+  <div class="dash-tab" onclick="switchTab('clases',this)">🎥 Clases Virtuales</div>
 </div>
 <div style="padding:24px">
   <div id="t-simulacros" class="tab-pane active">
@@ -258,6 +260,8 @@ h1,h2,h3,h4{font-family:'Playfair Display',serif}
   </div>
   <div id="t-videos" class="tab-pane"><div id="dash-videos"></div></div>
   <div id="t-rendimiento" class="tab-pane"><div id="dash-perf"></div></div>
+  <div id="t-documentos" class="tab-pane"><div id="dash-docs"></div></div>
+  <div id="t-clases" class="tab-pane"><div id="dash-rooms"></div></div>
 </div>
 </section>
 
@@ -277,7 +281,7 @@ h1,h2,h3,h4{font-family:'Playfair Display',serif}
     </div>
     <div class="alert alert-warn">⚠ El tiempo corre al iniciar. Al agotarse, se envía automáticamente.</div>
     <div id="intro-prev" style="margin-top:12px"></div>
-    <button class="btn btn-gold btn-block btn-lg" onclick="startExam()" style="margin-top:16px">🚀 Iniciar Simulacro</button>
+    <button class="btn btn-gold btn-block btn-lg" onclick="checkAndStartExam()" style="margin-top:16px">🚀 Iniciar Simulacro</button>
   </div>
 </div>
 </section>
@@ -356,7 +360,7 @@ async function apiFetch(path, opts={}){
   if(TOKEN) h['Authorization']='Bearer '+TOKEN;
   const r = await fetch(API+path, {...opts, headers:{...h,...(opts.headers||{})}});
   const data = await r.json();
-  if(!r.ok) throw new Error(data.error||'Error del servidor');
+  if(!r.ok) throw new Error(data.error || data.message || 'Error del servidor');
   return data;
 }
 
@@ -369,7 +373,14 @@ async function doRegister(){
   if(pass!==pass2) return showAlert('reg-alert','err','Las contraseñas no coinciden.');
   try{
     const d = await apiFetch('/auth/register',{method:'POST',body:JSON.stringify({doc_num:doc,name,email,phone,password:pass,course,school_id:school||null})});
-    TOKEN=d.token; USER=d.user; localStorage.setItem('token',TOKEN); localStorage.setItem('user',JSON.stringify(USER));
+    if(d.pending){
+      showAlert('reg-alert','ok','✅ Registro exitoso. <strong>Tu cuenta está pendiente de aprobación</strong> por el administrador. Te habilitarán el acceso pronto.');
+      ['rg-name','rg-doc','rg-email','rg-phone','rg-pass','rg-pass2'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
+      return;
+    }
+    // fallback if somehow active immediately
+    TOKEN=d.token; USER=d.user;
+    localStorage.setItem('token',TOKEN); localStorage.setItem('user',JSON.stringify(USER));
     loadDash(); showSec('s-dashboard');
   } catch(e){ showAlert('reg-alert','err',e.message); }
 }
@@ -383,7 +394,13 @@ async function doLogin(){
     TOKEN=d.token; USER=d.user; localStorage.setItem('token',TOKEN); localStorage.setItem('user',JSON.stringify(USER));
     if(USER.role==='admin'){ window.location.href='/admin/'; return; }
     loadDash(); showSec('s-dashboard');
-  } catch(e){ showAlert('login-alert','err',e.message); }
+  } catch(e){
+    if(e.message==='PENDIENTE'){
+      showAlert('login-alert','warn','⏳ Tu cuenta está <strong>pendiente de activación</strong>. El administrador la habilitará pronto. Si necesitas ayuda, contáctanos.');
+    } else {
+      showAlert('login-alert','err',e.message);
+    }
+  }
 }
 
 function logout(){ TOKEN=null; USER=null; localStorage.removeItem('token'); localStorage.removeItem('user'); showSec('s-landing'); }
@@ -507,6 +524,8 @@ function switchTab(t, el){
   document.getElementById('t-'+t).classList.add('active');
   if(t==='videos') loadDashVideos();
   if(t==='rendimiento') loadDashPerf();
+  if(t==='documentos') loadDashDocs();
+  if(t==='clases') loadDashRooms();
 }
 
 // ── EXAM ENGINE ──
@@ -530,21 +549,91 @@ async function loadIntro(simId){
   }catch(e){console.error(e);}
 }
 
-function startExam(){
+let autoSaveInterval = null;
+
+async function checkAndStartExam(){
+  if(!examSim) return;
+  // Check for saved session
+  try{
+    const sess = await apiFetch('/exam/progress/'+examSim.id);
+    if(sess.found){
+      const elapsed = Math.round((Date.now()-new Date(sess.updated_at).getTime())/60000);
+      const mins = Math.floor(sess.secs_remaining/60);
+      const answered = Object.keys(sess.answers||{}).length;
+      const totalQ = examSim.situations.reduce((a,s)=>a+s.questions.length,0);
+      // Show resume dialog
+      document.getElementById('resume-info').textContent =
+        `Guardado hace ${elapsed} min. Respondidas: ${answered}/${totalQ}. Tiempo restante: ${mins} min.`;
+      document.getElementById('resume-ov').style.display='flex';
+      return;
+    }
+  }catch(e){ console.warn('Session check failed, starting fresh', e); }
+  startExam(false);
+}
+
+function resumeExam(){
+  document.getElementById('resume-ov').style.display='none';
+  // Will load session in startExam
+  startExam(true);
+}
+function discardAndStartFresh(){
+  document.getElementById('resume-ov').style.display='none';
+  // Clear old session then start fresh
+  apiFetch('/exam/progress/'+examSim.id,{method:'DELETE'}).catch(()=>{});
+  startExam(false);
+}
+
+async function startExam(resume){
   if(!examSim) return;
   examAnswers={};
   examSecs=examSim.time_limit;
+
+  if(resume){
+    try{
+      const sess = await apiFetch('/exam/progress/'+examSim.id);
+      if(sess.found){
+        examAnswers = sess.answers || {};
+        examSecs = sess.secs_remaining || examSim.time_limit;
+      }
+    }catch(e){ console.warn('Could not load session', e); }
+  }
+
   document.getElementById('exam-title-hdr').textContent=examSim.title;
   renderExam();
+  // Re-apply saved answers to UI
+  Object.entries(examAnswers).forEach(([qId, opt])=>{
+    ['A','B','C','D'].forEach(k=>{
+      const el=document.getElementById('ol-'+qId+'-'+k);
+      if(el) el.classList.toggle('selected', k===opt);
+    });
+    const inp = document.querySelector('input[name="q'+qId+'"][value="'+opt+'"]');
+    if(inp) inp.checked=true;
+  });
+  const totalQ = examSim.situations.reduce((a,s)=>a+s.questions.length,0);
+  document.getElementById('exam-answered').textContent=Object.keys(examAnswers).length+' / '+totalQ+' respondidas';
   showSec('s-exam');
   startTimer();
+  // Auto-save every 30 seconds
+  clearInterval(autoSaveInterval);
+  autoSaveInterval = setInterval(saveExamProgress, 30000);
+}
+
+async function saveExamProgress(){
+  if(!examSim || examSecs<=0) return;
+  try{
+    await apiFetch('/exam/progress',{method:'POST',body:JSON.stringify({
+      simulacro_id: examSim.id,
+      answers: examAnswers,
+      secs_remaining: examSecs
+    })});
+  }catch(e){ console.warn('Auto-save failed', e); }
 }
 
 function renderExam(){
   let html='';
   let qTotal=0;
   examSim.situations.forEach(sit=>{
-  html+=`<div class="sit-box"><div class="sit-lbl">SITUACIÓN · ${sit.label||''}</div>${sit.image_url ? `<img src="${sit.image_url}" class="q-img" style="margin-bottom:12px" alt="Contexto">` : ''}<div class="sit-ctx">${sit.context||''}</div></div>`;
+    html+=`<div class="sit-box"><div class="sit-lbl">SITUACIÓN · ${sit.label||''}</div><div class="sit-ctx">${sit.context||''}</div></div>`;
     sit.questions.forEach((q,qi)=>{
       qTotal++;
       html+=`<div class="q-block" id="qb-${q.id}">
@@ -599,10 +688,12 @@ function confirmSubmit(){
 function closeConfirm(){ document.getElementById('confirm-ov').classList.add('hidden'); }
 
 async function submitExam(){
-  closeConfirm(); clearInterval(examTimer);
+  closeConfirm(); clearInterval(examTimer); clearInterval(autoSaveInterval);
   const timeUsed=examSim.time_limit-examSecs;
   try{
     const r=await apiFetch('/results',{method:'POST',body:JSON.stringify({simulacro_id:examSim.id,answers:examAnswers,time_used:timeUsed})});
+    // Clear saved session
+    apiFetch('/exam/progress/'+examSim.id,{method:'DELETE'}).catch(()=>{});
     await showResults(r);
   }catch(e){ alert('Error al guardar el resultado: '+e.message); }
 }
@@ -666,6 +757,55 @@ function getLevel(s){ return s>=85?'Superior':s>=70?'Alto':s>=50?'Básico':'Bajo
 function scoreBadge(s){ return s>=85?'badge-ok':s>=70?'badge-info':s>=50?'badge-gold':'badge-err'; }
 function scoreEmoji(s){ return s>=85?'🏆':s>=70?'🌟':s>=50?'📈':'📚'; }
 function fmtTime(s){ return Math.floor(s/60)+'min '+s%60+'s'; }
+
+async function loadDashDocs(){
+  const el = document.getElementById('dash-docs');
+  el.innerHTML = '<p style="color:rgba(255,255,255,.4);padding:10px">Cargando documentos...</p>';
+  try{
+    const data = await apiFetch('/documents?public=1');
+    const docs = data.filter(d => d.active && (d.course === USER.course || d.course === 'all'));
+    if(!docs.length){
+      el.innerHTML='<div class="empty"><div class="ei">📄</div><p>No hay documentos disponibles aún.</p></div>';
+      return;
+    }
+    const catLabels={guia:'Guía de estudio',normativa:'Normativa',material:'Material de clase',simulacro:'Simulacro',otro:'Otro'};
+    const docIcons={pdf:'📕',doc:'📘',docx:'📘',pptx:'📙',ppt:'📙'};
+    el.innerHTML = '<h3 style="color:var(--gold);font-size:1rem;margin-bottom:14px">📄 Documentos de Apoyo</h3>' +
+      docs.map(d => {
+        const ext = (d.filename||'').split('.').pop().toLowerCase();
+        const icon = docIcons[ext] || '📄';
+        const size = d.file_size ? (d.file_size>1048576?(d.file_size/1048576).toFixed(1)+' MB':Math.round(d.file_size/1024)+' KB') : '';
+        return `<div class="sim-card" style="margin-bottom:12px">
+          <div class="sim-icon" style="font-size:1.8rem">${icon}</div>
+          <div class="sim-body">
+            <div class="sim-title">${d.title}</div>
+            <div class="sim-meta">
+              <span style="background:rgba(201,168,76,.15);color:var(--gold);border-radius:4px;padding:2px 8px;font-size:.7rem">${catLabels[d.category]||d.category||''}</span>
+              ${size ? '<span>'+size+'</span>' : ''}
+              ${d.description ? '<span style="color:rgba(255,255,255,.4)">'+d.description+'</span>' : ''}
+            </div>
+          </div>
+          <a href="${d.file_url}" target="_blank" rel="noopener" class="btn btn-gold btn-sm" style="flex-shrink:0">⬇ Descargar</a>
+        </div>`;
+      }).join('');
+  }catch(e){
+    el.innerHTML='<div class="empty"><div class="ei">📄</div><p>Error al cargar documentos.</p></div>';
+  }
+}
+
 </script>
+
+<!-- Jitsi Meet Modal -->
+<div id="jitsi-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:2000;flex-direction:column">
+  <div style="background:var(--navy);padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid var(--gold-d)">
+    <div>
+      <span style="font-family:'Playfair Display',serif;color:var(--gold);font-size:1rem" id="jitsi-room-title">Clase Virtual</span>
+      <span style="font-size:.78rem;color:rgba(255,255,255,.4);margin-left:12px" id="jitsi-room-sub"></span>
+    </div>
+    <button onclick="closeJitsi()" class="btn btn-ghost btn-sm">✕ Salir de la clase</button>
+  </div>
+  <div id="jitsi-container" style="flex:1;min-height:0"></div>
+</div>
+
 </body>
 </html>
