@@ -1439,19 +1439,31 @@ function closeRoomModal(){ document.getElementById('room-modal').classList.add('
 async function saveRoom(){
   const id = document.getElementById('room-edit-id').value;
   const title = gv('room-title');
-  const room_name = gv('room-name');
+  let room_name = gv('room-name').trim(); // Obtenemos lo que pegaste
+  
+  // EL SISTEMA LO HACE SOLO: Si pegaste un link completo de Meet, extrae solo el código
+  if (room_name.includes('meet.google.com/')) {
+    room_name = room_name.split('meet.google.com/')[1].split('?')[0];
+  }
+
   clearAlert('room-alert');
   if(!title) return showAlert('room-alert','err','El título es obligatorio.');
-  if(!id && !room_name) return showAlert('room-alert','err','El nombre de sala es obligatorio.');
+  
   const payload = {
-    title, description: gv('room-desc'), course: gv('room-course'),
-    room_name: room_name, duration_min: parseInt(gv('room-duration'))||90,
-    scheduled_at: document.getElementById('room-date').value || null, active: true
+    title, 
+    description: gv('room-desc'), 
+    course: gv('room-course'),
+    room_name: room_name, // Aquí ya va el código limpio o el link externo
+    duration_min: parseInt(gv('room-duration'))||60,
+    scheduled_at: document.getElementById('room-date').value || null, 
+    active: true
   };
+
   try{
     if(id){ await apiFetch('/rooms/'+id,{method:'PUT',body:JSON.stringify(payload)}); }
     else   { await apiFetch('/rooms',{method:'POST',body:JSON.stringify(payload)}); }
-    closeRoomModal(); loadRooms();
+    closeRoomModal(); 
+    loadRooms();
   }catch(e){ showAlert('room-alert','err',e.message); }
 }
 
