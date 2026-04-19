@@ -171,33 +171,6 @@ CREATE INDEX IF NOT EXISTS idx_blocks_user ON user_blocks(user_id);
 
 
 
-
--- ─── EXAM SESSIONS (guardar progreso / reanudar simulacro) ──
-CREATE TABLE IF NOT EXISTS exam_sessions (
-  id               UUID      PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id          UUID      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  simulacro_id     UUID      NOT NULL REFERENCES simulacros(id) ON DELETE CASCADE,
-  answers          JSONB     NOT NULL DEFAULT '{}',  -- { questionId: 'A'|'B'|'C' }
-  secs_remaining   INT       NOT NULL DEFAULT 0,
-  updated_at       TIMESTAMP DEFAULT NOW(),
-  UNIQUE (user_id, simulacro_id)                    -- one active session per user per exam
-);
-CREATE INDEX IF NOT EXISTS idx_exam_sess_user ON exam_sessions(user_id);
-
--- ─── VIRTUAL ROOMS (aulas virtuales Jitsi) ─────────────────
-CREATE TABLE IF NOT EXISTS virtual_rooms (
-  id               UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-  title            VARCHAR(200) NOT NULL,
-  description      TEXT,
-  course           VARCHAR(50)  DEFAULT 'all',
-  room_name        VARCHAR(100) NOT NULL,        -- Jitsi room identifier (alphanumeric)
-  scheduled_at     TIMESTAMP,                    -- NULL = siempre disponible
-  duration_min     INT          DEFAULT 60,
-  active           BOOLEAN      DEFAULT true,
-  created_at       TIMESTAMP    DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_rooms_course ON virtual_rooms(course);
-
 -- ─── INDEXES ────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_users_doc       ON users(doc_num);
 CREATE INDEX IF NOT EXISTS idx_users_email     ON users(email);
