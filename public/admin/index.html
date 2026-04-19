@@ -128,6 +128,7 @@ tbody tr:hover{background:var(--g50)}
   <div class="nav-item" data-page="instituciones" onclick="navigate('instituciones',this)"><span class="ic">🏫</span> Instituciones</div>
   <div class="nav-item" data-page="simulacros" onclick="navigate('simulacros',this)"><span class="ic">📝</span> Simulacros</div>
   <div class="nav-item" data-page="videos" onclick="navigate('videos',this)"><span class="ic">🎬</span> Videos</div>
+  <div class="nav-item" data-page="clases" onclick="navigate('clases',this)"><span class="ic">🎥</span> Clases Virtuales</div>
   <div class="nav-item" data-page="documentos" onclick="navigate('documentos',this)"><span class="ic">📄</span> Documentos</div>
   <div class="sidebar-section">Sistema</div>
   <div class="nav-item" data-page="config" onclick="navigate('config',this)"><span class="ic">⚙</span> Configuración</div>
@@ -224,6 +225,20 @@ tbody tr:hover{background:var(--g50)}
   <div id="videos-list"></div>
 </div>
 
+<div id="page-clases" class="page">
+  <div class="flex justify-between items-center mb-3 gap-2">
+    <div>
+      <h2 style="font-size:1.4rem;color:var(--navy)">Clases Virtuales</h2>
+      <p style="font-size:.82rem;color:var(--g600);margin-top:2px">Crea salas de video con Jitsi Meet · Gratis · Sin instalación · Hasta 100 participantes</p>
+    </div>
+    <button class="btn btn-gold" onclick="openRoomModal()">+ Nueva Clase</button>
+  </div>
+  <div class="alert alert-info mb-3" style="background:#EFF6FF;border:1px solid #BFDBFE;color:#1E40AF">
+    💡 <strong>¿Cómo funciona?</strong> Crea una sala con nombre y horario. Los estudiantes verán la clase en su portal y podrán unirse con un clic directamente desde la plataforma, sin instalar nada.
+  </div>
+  <div id="rooms-list"></div>
+</div>
+
 <div id="page-documentos" class="page">
   <div class="flex justify-between items-center mb-3 gap-2">
     <h2 style="font-size:1.4rem;color:var(--navy)">Documentos de Apoyo</h2>
@@ -263,6 +278,55 @@ tbody tr:hover{background:var(--g50)}
 </div>
 </div>
 
+
+<!-- Room Modal -->
+<div id="room-modal" class="modal-ov hidden">
+<div class="modal-box" style="max-width:540px">
+  <h3 class="modal-title" id="room-modal-title">🎥 Nueva Clase Virtual</h3>
+  <input type="hidden" id="room-edit-id">
+  <div class="form-group">
+    <label class="form-label">Título de la clase *</label>
+    <input id="room-title" class="form-control" placeholder="Ej: Clase — Funciones del Docente · Sábado 8am">
+  </div>
+  <div class="form-group">
+    <label class="form-label">Descripción (opcional)</label>
+    <textarea id="room-desc" class="form-control" rows="2" placeholder="Tema a tratar, materiales, etc."></textarea>
+  </div>
+  <div class="grid-2">
+    <div class="form-group">
+      <label class="form-label">Curso</label>
+      <select id="room-course" class="form-control">
+        <option value="all">Todos</option>
+        <option value="concurso-docente">Concurso Docente</option>
+        <option value="ascenso">Ascenso</option>
+        <option value="preicfes">Pre-ICFES</option>
+        <option value="colegio">Colegio</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Duración estimada (min)</label>
+      <input id="room-duration" class="form-control" type="number" value="90" min="30">
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="form-group">
+      <label class="form-label">Fecha y hora programada</label>
+      <input id="room-date" class="form-control" type="datetime-local">
+      <p class="form-hint" style="color:var(--g400);font-size:.74rem;margin-top:3px">Dejar vacío = siempre disponible</p>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Nombre de la sala (ID) *</label>
+      <input id="room-name" class="form-control" placeholder="clase-docentes-abril">
+      <p class="form-hint" style="color:var(--g400);font-size:.74rem;margin-top:3px">Solo letras, números y guiones</p>
+    </div>
+  </div>
+  <div id="room-alert"></div>
+  <div style="display:flex;gap:10px;margin-top:14px">
+    <button class="btn btn-ghost" onclick="closeRoomModal()">Cancelar</button>
+    <button class="btn btn-gold" onclick="saveRoom()">Crear Sala</button>
+  </div>
+</div>
+</div>
 
 <!-- Blocks Modal -->
 <div id="blocks-modal" class="modal-ov hidden">
@@ -554,6 +618,7 @@ function navigate(page,el){
   if(page==='instituciones')loadSchools();
   if(page==='simulacros')loadSimulacros();
   if(page==='videos')loadVideos();
+  if(page==='clases')loadRooms();
   if(page==='documentos')loadDocs();
   if(page==='config')loadConfig();
 }
@@ -1297,6 +1362,114 @@ async function saveBlocks(){
     await apiFetch('/users/'+blocksUserId+'/blocks',{method:'PUT',body:JSON.stringify({blocks})});
     showAlert('blocks-alert','ok','✅ Accesos actualizados para '+blocksUserName+'.');
   }catch(e){ showAlert('blocks-alert','err','Error: '+e.message); }
+}
+
+
+// ══════════════════════════════════════════════
+//  CLASES VIRTUALES
+// ══════════════════════════════════════════════
+let adminJitsiAPI = null;
+
+async function loadRooms(){
+  const el = document.getElementById('rooms-list');
+  el.innerHTML = '<p style="color:var(--g400);padding:14px">Cargando salas...</p>';
+  try{
+    const rooms = await apiFetch('/rooms');
+    if(!rooms.length){
+      el.innerHTML = '<div class="empty-state"><div class="ei">🎥</div><p>No hay clases virtuales. Crea la primera.</p></div>';
+      return;
+    }
+    el.innerHTML = rooms.map(r => {
+      const dateStr = r.scheduled_at
+        ? new Date(r.scheduled_at).toLocaleString('es-CO',{dateStyle:'full',timeStyle:'short'})
+        : 'Siempre disponible';
+      const jitsiUrl = 'https://meet.jit.si/SolucionesAcademicasLombana-'+r.room_name;
+      return `<div style="background:#fff;border-radius:12px;box-shadow:var(--shadow);padding:20px;margin-bottom:14px">
+        <div style="display:flex;align-items:flex-start;gap:16px">
+          <div style="width:52px;height:52px;background:#EFF6FF;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:1.6rem;flex-shrink:0">🎥</div>
+          <div style="flex:1">
+            <div style="font-weight:700;font-size:.97rem;color:var(--navy)">${r.title}</div>
+            <div style="font-size:.8rem;color:var(--g600);margin-top:4px">
+              <span>📅 ${dateStr}</span>
+              <span style="margin-left:14px">⏱ ${r.duration_min} min</span>
+              <span style="margin-left:14px"><span class="badge badge-info" style="font-size:.68rem">${CN[r.course]||r.course}</span></span>
+              <span style="margin-left:10px"><span class="badge ${r.active?'badge-ok':'badge-err'}">${r.active?'Activa':'Inactiva'}</span></span>
+            </div>
+            ${r.description ? '<div style="font-size:.8rem;color:var(--g400);margin-top:4px">'+r.description+'</div>' : ''}
+            <div style="margin-top:8px;font-size:.78rem;color:var(--g400)">🔗 <a href="${jitsiUrl}" target="_blank" style="color:var(--info)">${jitsiUrl}</a></div>
+          </div>
+          <div style="display:flex;gap:7px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
+            <button class="btn btn-gold btn-sm" onclick="adminJoinRoom('${r.room_name}','${r.title.replace(/'/g,'')}')">📹 Entrar</button>
+            <button class="btn btn-ghost btn-sm" onclick="editRoom(${JSON.stringify(r).replace(/"/g,'&quot;')})">✏</button>
+            <button class="btn btn-xs ${r.active?'btn-err':'btn-ok'}" onclick="toggleRoom('${r.id}',${!r.active})">${r.active?'Inactivar':'Activar'}</button>
+            <button class="btn btn-err btn-xs" onclick="deleteRoom('${r.id}')">🗑</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+  }catch(e){ el.innerHTML=`<div class="alert alert-err">${e.message}</div>`; }
+}
+
+function openRoomModal(){
+  document.getElementById('room-modal-title').textContent='🎥 Nueva Clase Virtual';
+  document.getElementById('room-edit-id').value='';
+  ['room-title','room-desc','room-name'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('room-course').value='all';
+  document.getElementById('room-duration').value='90';
+  document.getElementById('room-date').value='';
+  clearAlert('room-alert');
+  document.getElementById('room-modal').classList.remove('hidden');
+}
+
+function editRoom(r){
+  document.getElementById('room-modal-title').textContent='✏ Editar Clase';
+  document.getElementById('room-edit-id').value=r.id;
+  document.getElementById('room-title').value=r.title;
+  document.getElementById('room-desc').value=r.description||'';
+  document.getElementById('room-name').value=r.room_name;
+  document.getElementById('room-course').value=r.course;
+  document.getElementById('room-duration').value=r.duration_min||90;
+  document.getElementById('room-date').value=r.scheduled_at ? r.scheduled_at.slice(0,16) : '';
+  clearAlert('room-alert');
+  document.getElementById('room-modal').classList.remove('hidden');
+}
+
+function closeRoomModal(){ document.getElementById('room-modal').classList.add('hidden'); }
+
+async function saveRoom(){
+  const id = document.getElementById('room-edit-id').value;
+  const title = gv('room-title');
+  const room_name = gv('room-name');
+  clearAlert('room-alert');
+  if(!title) return showAlert('room-alert','err','El título es obligatorio.');
+  if(!id && !room_name) return showAlert('room-alert','err','El nombre de sala es obligatorio.');
+  const payload = {
+    title, description: gv('room-desc'), course: gv('room-course'),
+    room_name: room_name, duration_min: parseInt(gv('room-duration'))||90,
+    scheduled_at: document.getElementById('room-date').value || null, active: true
+  };
+  try{
+    if(id){ await apiFetch('/rooms/'+id,{method:'PUT',body:JSON.stringify(payload)}); }
+    else   { await apiFetch('/rooms',{method:'POST',body:JSON.stringify(payload)}); }
+    closeRoomModal(); loadRooms();
+  }catch(e){ showAlert('room-alert','err',e.message); }
+}
+
+async function toggleRoom(id, active){
+  try{ await apiFetch('/rooms/'+id,{method:'PUT',body:JSON.stringify({active})}); loadRooms(); }
+  catch(e){ alert(e.message); }
+}
+
+async function deleteRoom(id){
+  if(!confirm('¿Eliminar esta sala?'))return;
+  try{ await apiFetch('/rooms/'+id,{method:'DELETE'}); loadRooms(); }
+  catch(e){ alert(e.message); }
+}
+
+// Admin joins the Jitsi room (opens in new tab — simpler for admin)
+function adminJoinRoom(roomName, title){
+  const url = 'https://meet.jit.si/SolucionesAcademicasLombana-'+roomName;
+  window.open(url, '_blank');
 }
 
 </script>
