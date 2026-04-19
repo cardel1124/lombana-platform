@@ -25,6 +25,10 @@ const pool = new Pool({
 });
 
 pool.on('error', (err) => console.error('DB error:', err));
+pool.query(`
+CREATE TABLE IF NOT EXISTS documents (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), title VARCHAR(300) NOT NULL, description TEXT, course VARCHAR(50) DEFAULT 'all', category VARCHAR(50) DEFAULT 'guia', filename VARCHAR(300), file_url VARCHAR(600) NOT NULL, file_size BIGINT DEFAULT 0, active BOOLEAN DEFAULT true, created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()); 
+CREATE TABLE IF NOT EXISTS user_blocks (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, content_type VARCHAR(20) NOT NULL, content_id UUID NOT NULL, created_at TIMESTAMP DEFAULT NOW(), UNIQUE (user_id, content_type, content_id));
+`).catch(e => console.error(e));
 
 async function query(text, params) {
   const client = await pool.connect();
@@ -818,111 +822,6 @@ app.post('/api/users/:id/blocks/toggle', adminOnly, async (req, res) => {
       res.json({ blocked: true });
     }
   } catch (err) { res.status(500).json({ error: 'Error' }); }
-});
-
-
-// ═══════════════════════════════════════════════════
-// EXAM SESSIONS — guardar progreso / reanudar
-// ═══════════════════════════════════════════════════
-
-// Save in-progress exam state (called every 30s from frontend)
-app.post('/api/exam/progress', auth, async (req, res) => {
-  try {
-    const { simulacro_id, answers, secs_remaining } = req.body;
-    if (!simulacro_id) return res.status(400).json({ error: 'simulacro_id requerido' });
-    await query(
-      `INSERT INTO exam_sessions (user_id, simulacro_id, answers, secs_remaining, updated_at)
-       VALUES ($1,$2,$3,$4,NOW())
-       ON CONFLICT (user_id, simulacro_id)
-       DO UPDATE SET answers=$3, secs_remaining=$4, updated_at=NOW()`,
-      [req.user.id, simulacro_id, JSON.stringify(answers || {}), secs_remaining || 0]
-    );
-    res.json({ ok: true });
-  } catch (err) { console.error('exam progress:', err); res.status(500).json({ error: err.message }); }
-});
-
-// Get saved session for a simulacro (check before starting)
-app.get('/api/exam/progress/:simulacro_id', auth, async (req, res) => {
-  try {
-    const r = await query(
-      `SELECT * FROM exam_sessions WHERE user_id=$1 AND simulacro_id=$2`,
-      [req.user.id, req.params.simulacro_id]
-    );
-    if (!r.rows.length) return res.json({ found: false });
-    const sess = r.rows[0];
-    // Expire sessions older than 48h
-    const age = Date.now() - new Date(sess.updated_at).getTime();
-    if (age > 48 * 3600 * 1000) {
-      await query('DELETE FROM exam_sessions WHERE user_id=$1 AND simulacro_id=$2',
-        [req.user.id, req.params.simulacro_id]);
-      return res.json({ found: false });
-    }
-    res.json({
-      found: true,
-      answers: typeof sess.answers === 'string' ? JSON.parse(sess.answers) : sess.answers,
-      secs_remaining: sess.secs_remaining,
-      updated_at: sess.updated_at
-    });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Clear session when exam is submitted
-app.delete('/api/exam/progress/:simulacro_id', auth, async (req, res) => {
-  try {
-    await query('DELETE FROM exam_sessions WHERE user_id=$1 AND simulacro_id=$2',
-      [req.user.id, req.params.simulacro_id]);
-    res.json({ ok: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ═══════════════════════════════════════════════════
-// VIRTUAL ROOMS — aulas virtuales (Jitsi embed)
-// ═══════════════════════════════════════════════════
-
-app.get('/api/rooms', auth, async (req, res) => {
-  try {
-    const isAdmin = req.user.role === 'admin';
-    let q = 'SELECT * FROM virtual_rooms WHERE 1=1';
-    const p = [];
-    if (!isAdmin) { q += ' AND active=true AND (course=$1 OR course='all')'; p.push(req.user.course); }
-    q += ' ORDER BY scheduled_at DESC NULLS LAST, created_at DESC';
-    const r = await query(q, p);
-    res.json(r.rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post('/api/rooms', adminOnly, async (req, res) => {
-  try {
-    const { title, description, course, room_name, scheduled_at, duration_min } = req.body;
-    if (!title || !room_name) return res.status(400).json({ error: 'Título y nombre de sala son obligatorios' });
-    // room_name becomes the Jitsi room: must be alphanumeric+dashes
-    const safe = room_name.trim().replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
-    const r = await query(
-      `INSERT INTO virtual_rooms (title, description, course, room_name, scheduled_at, duration_min)
-       VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
-      [title, description || null, course || 'all', safe,
-       scheduled_at || null, parseInt(duration_min) || 60]
-    );
-    res.status(201).json(r.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.put('/api/rooms/:id', adminOnly, async (req, res) => {
-  try {
-    const { title, description, course, scheduled_at, duration_min, active } = req.body;
-    await query(
-      'UPDATE virtual_rooms SET title=$1,description=$2,course=$3,scheduled_at=$4,duration_min=$5,active=$6 WHERE id=$7',
-      [title, description, course, scheduled_at || null, parseInt(duration_min) || 60, active, req.params.id]
-    );
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.delete('/api/rooms/:id', adminOnly, async (req, res) => {
-  try {
-    await query('DELETE FROM virtual_rooms WHERE id=$1', [req.params.id]);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // Health check
