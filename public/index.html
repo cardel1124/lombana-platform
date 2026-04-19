@@ -502,8 +502,16 @@ async function loadDashRooms(){
 }
 
 function openJitsi(roomName, title) {
-  // Abre la clase en una pestaña nueva segura y en pantalla completa
-  window.open(`https://meet.jit.si/${roomName}`, '_blank');
+  // El sistema detecta si es un link completo o solo un código
+  let url = roomName.trim();
+  
+  // Si no empieza con http, el sistema asume que es un código de Google Meet y lo completa
+  if (!url.startsWith('http')) {
+    url = `https://meet.google.com/${url}`;
+  }
+  
+  // Abre la clase automáticamente en una pestaña nueva
+  window.open(url, '_blank');
 }
 
 function closeJitsi() {
