@@ -250,6 +250,7 @@ h1,h2,h3,h4{font-family:'Playfair Display',serif}
   <div class="dash-tab" onclick="switchTab('videos',this)">🎬 Videos</div>
   <div class="dash-tab" onclick="switchTab('rendimiento',this)">📊 Mi Rendimiento</div>
   <div class="dash-tab" onclick="switchTab('documentos',this)">📄 Documentos</div>
+  <div class="dash-tab" onclick="switchTab('clases',this)">🎥 Clases Virtuales</div>
 </div>
 <div style="padding:24px">
   <div id="t-simulacros" class="tab-pane active">
@@ -260,6 +261,7 @@ h1,h2,h3,h4{font-family:'Playfair Display',serif}
   <div id="t-videos" class="tab-pane"><div id="dash-videos"></div></div>
   <div id="t-rendimiento" class="tab-pane"><div id="dash-perf"></div></div>
   <div id="t-documentos" class="tab-pane"><div id="dash-docs"></div></div>
+  <div id="t-clases" class="tab-pane"><div id="dash-rooms"></div></div>
 </div>
 </section>
 
@@ -279,7 +281,7 @@ h1,h2,h3,h4{font-family:'Playfair Display',serif}
     </div>
     <div class="alert alert-warn">⚠ El tiempo corre al iniciar. Al agotarse, se envía automáticamente.</div>
     <div id="intro-prev" style="margin-top:12px"></div>
-    <button class="btn btn-gold btn-block btn-lg" onclick="startExam()" style="margin-top:16px">🚀 Iniciar Simulacro</button>
+    <button class="btn btn-gold btn-block btn-lg" onclick="checkAndStartExam()" style="margin-top:16px">🚀 Iniciar Simulacro</button>
   </div>
 </div>
 </section>
@@ -523,6 +525,7 @@ function switchTab(t, el){
   if(t==='videos') loadDashVideos();
   if(t==='rendimiento') loadDashPerf();
   if(t==='documentos') loadDashDocs();
+  if(t==='clases') loadDashRooms();
 }
 
 // ── EXAM ENGINE ──
@@ -546,14 +549,84 @@ async function loadIntro(simId){
   }catch(e){console.error(e);}
 }
 
-function startExam(){
+let autoSaveInterval = null;
+
+async function checkAndStartExam(){
+  if(!examSim) return;
+  // Check for saved session
+  try{
+    const sess = await apiFetch('/exam/progress/'+examSim.id);
+    if(sess.found){
+      const elapsed = Math.round((Date.now()-new Date(sess.updated_at).getTime())/60000);
+      const mins = Math.floor(sess.secs_remaining/60);
+      const answered = Object.keys(sess.answers||{}).length;
+      const totalQ = examSim.situations.reduce((a,s)=>a+s.questions.length,0);
+      // Show resume dialog
+      document.getElementById('resume-info').textContent =
+        `Guardado hace ${elapsed} min. Respondidas: ${answered}/${totalQ}. Tiempo restante: ${mins} min.`;
+      document.getElementById('resume-ov').style.display='flex';
+      return;
+    }
+  }catch(e){ console.warn('Session check failed, starting fresh', e); }
+  startExam(false);
+}
+
+function resumeExam(){
+  document.getElementById('resume-ov').style.display='none';
+  // Will load session in startExam
+  startExam(true);
+}
+function discardAndStartFresh(){
+  document.getElementById('resume-ov').style.display='none';
+  // Clear old session then start fresh
+  apiFetch('/exam/progress/'+examSim.id,{method:'DELETE'}).catch(()=>{});
+  startExam(false);
+}
+
+async function startExam(resume){
   if(!examSim) return;
   examAnswers={};
   examSecs=examSim.time_limit;
+
+  if(resume){
+    try{
+      const sess = await apiFetch('/exam/progress/'+examSim.id);
+      if(sess.found){
+        examAnswers = sess.answers || {};
+        examSecs = sess.secs_remaining || examSim.time_limit;
+      }
+    }catch(e){ console.warn('Could not load session', e); }
+  }
+
   document.getElementById('exam-title-hdr').textContent=examSim.title;
   renderExam();
+  // Re-apply saved answers to UI
+  Object.entries(examAnswers).forEach(([qId, opt])=>{
+    ['A','B','C','D'].forEach(k=>{
+      const el=document.getElementById('ol-'+qId+'-'+k);
+      if(el) el.classList.toggle('selected', k===opt);
+    });
+    const inp = document.querySelector('input[name="q'+qId+'"][value="'+opt+'"]');
+    if(inp) inp.checked=true;
+  });
+  const totalQ = examSim.situations.reduce((a,s)=>a+s.questions.length,0);
+  document.getElementById('exam-answered').textContent=Object.keys(examAnswers).length+' / '+totalQ+' respondidas';
   showSec('s-exam');
   startTimer();
+  // Auto-save every 30 seconds
+  clearInterval(autoSaveInterval);
+  autoSaveInterval = setInterval(saveExamProgress, 30000);
+}
+
+async function saveExamProgress(){
+  if(!examSim || examSecs<=0) return;
+  try{
+    await apiFetch('/exam/progress',{method:'POST',body:JSON.stringify({
+      simulacro_id: examSim.id,
+      answers: examAnswers,
+      secs_remaining: examSecs
+    })});
+  }catch(e){ console.warn('Auto-save failed', e); }
 }
 
 function renderExam(){
@@ -615,10 +688,12 @@ function confirmSubmit(){
 function closeConfirm(){ document.getElementById('confirm-ov').classList.add('hidden'); }
 
 async function submitExam(){
-  closeConfirm(); clearInterval(examTimer);
+  closeConfirm(); clearInterval(examTimer); clearInterval(autoSaveInterval);
   const timeUsed=examSim.time_limit-examSecs;
   try{
     const r=await apiFetch('/results',{method:'POST',body:JSON.stringify({simulacro_id:examSim.id,answers:examAnswers,time_used:timeUsed})});
+    // Clear saved session
+    apiFetch('/exam/progress/'+examSim.id,{method:'DELETE'}).catch(()=>{});
     await showResults(r);
   }catch(e){ alert('Error al guardar el resultado: '+e.message); }
 }
@@ -719,5 +794,18 @@ async function loadDashDocs(){
 }
 
 </script>
+
+<!-- Jitsi Meet Modal -->
+<div id="jitsi-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:2000;flex-direction:column">
+  <div style="background:var(--navy);padding:12px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid var(--gold-d)">
+    <div>
+      <span style="font-family:'Playfair Display',serif;color:var(--gold);font-size:1rem" id="jitsi-room-title">Clase Virtual</span>
+      <span style="font-size:.78rem;color:rgba(255,255,255,.4);margin-left:12px" id="jitsi-room-sub"></span>
+    </div>
+    <button onclick="closeJitsi()" class="btn btn-ghost btn-sm">✕ Salir de la clase</button>
+  </div>
+  <div id="jitsi-container" style="flex:1;min-height:0"></div>
+</div>
+
 </body>
 </html>
