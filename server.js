@@ -25,6 +25,29 @@ const pool = new Pool({
 });
 
 pool.on('error', (err) => console.error('DB error:', err));
+// TRUCO AUTOMÁTICO PARA TABLAS 3.0
+pool.query(`
+CREATE TABLE IF NOT EXISTS exam_sessions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  simulacro_id UUID NOT NULL REFERENCES simulacros(id) ON DELETE CASCADE,
+  answers JSONB NOT NULL DEFAULT '{}',
+  secs_remaining INT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMP DEFAULT NOW(),
+  UNIQUE (user_id, simulacro_id)
+);
+CREATE TABLE IF NOT EXISTS virtual_rooms (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title VARCHAR(200) NOT NULL,
+  description TEXT,
+  course VARCHAR(50) DEFAULT 'all',
+  room_name VARCHAR(100) NOT NULL,
+  scheduled_at TIMESTAMP,
+  duration_min INT DEFAULT 60,
+  active BOOLEAN DEFAULT true,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+`).catch(e => console.error("Error en tablas:", e));
 pool.query(`
 CREATE TABLE IF NOT EXISTS documents (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), title VARCHAR(300) NOT NULL, description TEXT, course VARCHAR(50) DEFAULT 'all', category VARCHAR(50) DEFAULT 'guia', filename VARCHAR(300), file_url VARCHAR(600) NOT NULL, file_size BIGINT DEFAULT 0, active BOOLEAN DEFAULT true, created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()); 
 CREATE TABLE IF NOT EXISTS user_blocks (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, content_type VARCHAR(20) NOT NULL, content_id UUID NOT NULL, created_at TIMESTAMP DEFAULT NOW(), UNIQUE (user_id, content_type, content_id));
