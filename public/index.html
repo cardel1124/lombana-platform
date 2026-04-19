@@ -474,7 +474,44 @@ async function loadDashSims(){
     }).join('');
   }catch(e){ console.error(e); }
 }
+async function loadDashRooms(){
+  const el = document.getElementById('dash-rooms') || document.getElementById('dash-aulas');
+  if(!el) return;
+  try {
+    const rooms = await apiFetch('/rooms');
+    if(!rooms.length){ 
+      el.innerHTML = '<div class="empty"><div class="ei">🎥</div><p>No hay clases en vivo programadas en este momento.</p></div>'; 
+      return; 
+    }
+    el.innerHTML = '<h3 style="color:var(--gold);font-size:1rem;margin-bottom:14px">🔴 Clases en Vivo</h3>' +
+      rooms.map(r => `<div class="sim-card">
+        <div class="sim-icon" style="font-size:1.8rem">🎥</div>
+        <div class="sim-body">
+          <div class="sim-title">${r.title}</div>
+          <div class="sim-meta">
+            <span>📅 ${r.scheduled_at ? new Date(r.scheduled_at).toLocaleString('es-CO') : 'Siempre abierta'}</span>
+            <span>⏱ ${r.duration_min} min</span>
+            ${r.description ? `<br><span style="color:rgba(255,255,255,.4)">${r.description}</span>` : ''}
+          </div>
+        </div>
+        <button class="btn btn-gold btn-sm" style="flex-shrink:0" onclick="openJitsi('${r.room_name}', '${r.title}')">Entrar a Sala →</button>
+      </div>`).join('');
+  } catch(e) { 
+    el.innerHTML = '<div class="empty"><div class="ei">🎥</div><p>Error al cargar las aulas.</p></div>'; 
+  }
+}
 
+function openJitsi(roomName, title) {
+  document.getElementById('jitsi-modal').style.display = 'flex';
+  const frame = document.getElementById('jitsi-frame');
+  if(frame) frame.src = `https://meet.jit.si/${roomName}`;
+}
+
+function closeJitsi() {
+  document.getElementById('jitsi-modal').style.display = 'none';
+  const frame = document.getElementById('jitsi-frame');
+  if(frame) frame.src = '';
+}
 async function loadDashVideos(){
   const el=document.getElementById('dash-videos');
   try{
