@@ -1,6 +1,6 @@
 /**
- * Soluciones Académicas Lombana — Parser v4 (X-Ray & Inteligente)
- * Soporta: HTML dinámico (QS Array), Word, PDF, Hoja de Respuestas.
+ * Soluciones Académicas Lombana — Parser v5 (Blindado)
+ * Soporta: HTML dinámico (QS Array seguro), Word, PDF, Hoja de Respuestas.
  */
 'use strict';
 const fs   = require('fs');
@@ -55,7 +55,7 @@ async function parseZip(zipPath) {
   return parseLombanaHtml(htmlEntry.getData().toString('utf-8'), imageMap);
 }
 
-// ─── LOMBANA HTML PARSER (Con Rayos X para QS) ─────
+// ─── LOMBANA HTML PARSER ───────────────────────────
 async function parseLombanaHtml(html, imageMap) {
   let cheerio;
   try { cheerio = require('cheerio'); }
@@ -75,61 +75,32 @@ async function parseLombanaHtml(html, imageMap) {
   const tm = scriptText.match(/TOTAL_SECONDS\s*=\s*([\d\s*+]+)/);
   if (tm) { try { timeLimit = Function('"use strict"; return (' + tm[1].replace(/[^0-9\s*+]/g, '') + ')')(); } catch {} }
 
-  // MAGIA 1: Lector de la variable QS (Tu formato interactivo)
-  let extractedSituations = null;
-  try {
-    const qsMatch = scriptText.match(/const\s+QS\s*=\s*(\[[\s\S]*?\]\s*);?\s*(?:const|let|var|function|\/\/|\/\*|$)/);
-    if (qsMatch) {
-      const arr = Function('"use strict"; return (' + qsMatch[1] + ')')();
-      if (Array.isArray(arr) && arr.length > 0) {
-        const sits = [];
-        let curSit = null;
-        arr.forEach(item => {
-          const sitText = item.sit || '';
-          if (sitText || !curSit) {
-            curSit = { label: item.sitLabel || `Situación ${sits.length + 1}`, context: sitText, image_url: item.sitImg || null, questions: [] };
-            sits.push(curSit);
-          }
-          const options = (item.opts || []).map((oText, i) => ({
-            key: String.fromCharCode(65 + i),
-            text: String(oText).replace(/<[^>]+>/g, '').trim(),
-            image_url: null
-          }));
-          if (!options.length) ['A','B','C','D'].forEach(k => options.push({key: k, text: `Opción ${k}`, image_url: null}));
-          
-          curSit.questions.push({
-            num: item.n || 0,
-            text: String(item.q || '').replace(/<[^>]+>/g, '').trim(),
-            image_url: item.qImg || null,
-            correct_answer: item.ans !== undefined ? String.fromCharCode(65 + parseInt(item.ans)) : 'A',
-            options
-          });
-        });
-        extractedSituations = sits;
-      }
-    }
-  } catch(e) { console.error("Error extrayendo QS:", e); }
-
-  // Si encontró preguntas en Javascript, las devuelve inmediatamente
-  if (extractedSituations && extractedSituations.length > 0) {
-    let c = 0;
-    extractedSituations.forEach(s => s.questions.forEach(q => q.num = ++c));
-    return { title, timeLimit, situations: extractedSituations, totalQuestions: c, totalSituations: extractedSituations.length, images: Object.values(imageMap) };
-  }
-
-  // MAGIA 2: Lector de Respuesta ANSWER_KEY clásico
   const answerKey = {};
+  
+  // EXTRACCIÓN SEGURA DE RESPUESTAS DEL HTML (Sin usar eval para evitar crasheos)
+  // Busca el formato clásico: ANSWER_KEY = { 1: "A" }
   const km = scriptText.match(/ANSWER_KEY\s*=\s*\{([^}]+)\}/s);
   if (km) {
     for (const [, n, a] of km[1].matchAll(/(\d+)\s*:\s*['"]([A-Da-d])['"]/g)) answerKey[parseInt(n)] = a.toUpperCase();
   }
+  
+  // Busca en tu formato QS interactivo: n: 1, ans: 0 (0=A, 1=B, 2=C...)
+  for (const [, n, a] of scriptText.matchAll(/n\s*:\s*(\d+)[^}]*?ans\s*:\s*(\d+)/g)) {
+    answerKey[parseInt(n)] = String.fromCharCode(65 + parseInt(a));
+  }
+  for (const [, a, n] of scriptText.matchAll(/ans\s*:\s*(\d+)[^}]*?n\s*:\s*(\d+)/g)) {
+    answerKey[parseInt(n)] = String.fromCharCode(65 + parseInt(a));
+  }
 
-  // Si no es JS, procesa el texto normal
+  // Procesamos el texto visual del HTML
   const fallback = parseTextLines($('body').text());
+  
+  // Asignamos las respuestas encontradas en los scripts a las preguntas
   Object.keys(answerKey).forEach(n => {
     const q = fallback.situations.flatMap(s => s.questions).find(q => q.num === parseInt(n));
     if (q) q.correct_answer = answerKey[n];
   });
+  
   fallback.title = title;
   fallback.timeLimit = timeLimit;
   fallback.images = Object.values(imageMap);
@@ -185,7 +156,6 @@ async function parsePdf(buffer) {
 function parseTextLines(raw, html) {
   let rawText = String(raw || '');
   
-  // Limpiar HTML pegado si existe
   if (rawText.includes('<html') || rawText.includes('<div') || rawText.includes('<p>')) {
       rawText = rawText.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n\n').replace(/<\/div>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ');
   }
@@ -204,10 +174,16 @@ function parseTextLines(raw, html) {
     curSit.questions.push(curQ);
     curQ = null;
   };
+  
   const pushSit = () => {
     if (!curSit) return;
     pushQ();
-    if (ctxBuf.length && !curSit.context) { curSit.context = ctxBuf.join('\n').trim(); ctxBuf = []; }
+    if (ctxBuf.length && !curSit.context) { 
+        let cStr = ctxBuf.join('\n').trim();
+        // Filtro antimanchas: Ignora líneas sueltas que sean solo números como "1-4" o "Página 2"
+        if (!/^(?:\d+-\d+|\d+|p[áa]gina.*)$/i.test(cStr)) curSit.context = cStr;
+        ctxBuf = []; 
+    }
     if (curSit.questions.length || curSit.context) situations.push(curSit);
     curSit = null;
   };
@@ -223,7 +199,11 @@ function parseTextLines(raw, html) {
     const qm = line.match(P_Q);
     if (qm && !P_O.test(line) && +qm[1] >= 1 && +qm[1] <= 999) {
       inCtx = false;
-      if (curSit && ctxBuf.length && !curSit.context) { curSit.context = ctxBuf.join('\n').trim(); ctxBuf = []; }
+      if (curSit && ctxBuf.length && !curSit.context) { 
+          let cStr = ctxBuf.join('\n').trim();
+          if (!/^(?:\d+-\d+|\d+|p[áa]gina.*)$/i.test(cStr)) curSit.context = cStr;
+          ctxBuf = []; 
+      }
       if (!curSit) curSit = { label: `Situación ${situations.length + 1}`, context: '', image_url: null, questions: [] };
       pushQ();
       curQ = { num: +qm[1], text: qm[2].trim(), image_url: null, correct_answer: 'A', options: [] };
@@ -234,6 +214,7 @@ function parseTextLines(raw, html) {
     if (om && curQ) { 
         let optKey = om[1].toUpperCase();
         let optText = om[2].trim();
+        // Detectar asterisco en la opción
         if (optText.includes('*')) { curQ.correct_answer = optKey; optText = optText.replace(/\*/g, '').trim(); }
         curQ.options.push({ key: optKey, text: optText, image_url: null }); 
         continue; 
@@ -269,7 +250,7 @@ function parseTextLines(raw, html) {
   }
 
   // MAGIA 3: Escáner de Hoja de Respuestas al final del documento
-  const bottomText = rawText.slice(-2000); // Revisa los últimos 2000 caracteres
+  const bottomText = rawText.slice(-2000); 
   const ansKeyMatch = bottomText.match(/(?:respuestas|claves|hoja de respuestas|solucionario)[\s\S]+/i);
   if (ansKeyMatch) {
      const keys = [...ansKeyMatch[0].matchAll(/(\d{1,3})[.\-]?\s*([A-D])/gi)];
