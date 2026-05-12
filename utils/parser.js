@@ -1,5 +1,5 @@
 /**
- * Soluciones Académicas Lombana — Parser v3 (Inteligente)
+ * Soluciones Académicas Lombana — Parser v3.1 (Inteligente y Corregido)
  * PDF · DOCX · HTML (formato Lombana) · ZIP (HTML + imagen/)
  */
 'use strict';
@@ -80,7 +80,7 @@ async function parseLombanaHtml(html, imageMap) {
 
   const $ = cheerio.load(processed, { decodeEntities: false });
 
-  // Fallback: buscar bloque de script
+  // Buscar bloque de script de respuestas (Funciona perfecto con tu HTML)
   const answerKey = {};
   const scriptText = $('script').map((_, el) => $(el).html() || '').get().join('\n');
   const km = scriptText.match(/ANSWER_KEY\s*=\s*\{([^}]+)\}/s);
@@ -110,6 +110,7 @@ async function parseLombanaHtml(html, imageMap) {
   let curSit   = null;
   let globalQ  = 0;
 
+  // ESTE ERA EL BLOQUE CON EL ERROR. AHORA LEE DE CORRIDO.
   $('body *').each((_, el) => {
     const $el  = $(el);
     const tag  = el.tagName || '';
@@ -125,13 +126,15 @@ async function parseLombanaHtml(html, imageMap) {
         const s = resolveImg($(img).attr('src'));
         if (s && !s.includes('logolombana')) ctxImg = ctxImg || s;
       });
-      $el.find('img').remove();
-
+      
       const label = $el.find('h3,h4').first().text().trim() || `Situación ${situations.length + 1}`;
-      const ctx   = $el.text().replace(/\s{2,}/g, ' ').trim();
+      
+      // Extraemos el texto sin modificar el HTML para no dañar los hijos
+      let ctx = $el.clone().children().remove().end().text().replace(/\s{2,}/g, ' ').trim();
+      if (!ctx) ctx = $el.text().replace(/\s{2,}/g, ' ').trim();
 
       curSit = { label, context: ctx, image_url: ctxImg, questions: [] };
-      return false; 
+      return; // <-- CORREGIDO
     }
 
     // STANDALONE IMAGE
@@ -152,7 +155,6 @@ async function parseLombanaHtml(html, imageMap) {
     let detectedAnswer = null;
     let qText = $el.find('.question-text,.q-text').first().text().replace(/\s{2,}/g, ' ').trim();
     
-    // Buscar "Respuesta: X" en el texto de la pregunta
     const ansMatch = qText.match(/(?:Respuesta|Clave|Correcta)[^\w]*([A-Da-d])/i);
     if (ansMatch) {
         detectedAnswer = ansMatch[1].toUpperCase();
@@ -170,34 +172,18 @@ async function parseLombanaHtml(html, imageMap) {
       const $opt  = $(optEl);
       const key   = ($opt.find('input[type=radio]').attr('value') || '').toUpperCase();
       if (!key) return;
-      const optImg = resolveImg($opt.find('img').first().attr('src'));
-      $opt.find('.option-dot,.opt-dot,input').remove();
       
-      let text  = $opt.text().replace(/\s{2,}/g, ' ').trim();
+      const optImg = resolveImg($opt.find('img').first().attr('src'));
+      let text  = $opt.clone().children().remove().end().text().replace(/\s{2,}/g, ' ').trim();
+      if(!text) text = $opt.find('span').not('.option-dot').text().replace(/\s{2,}/g, ' ').trim();
 
-      // Detectar asterisco o clase "correct-ans" en el HTML
       if (text.includes('*') || $opt.hasClass('correct-ans') || $opt.hasClass('correct') || $opt.find('input[checked]').length) {
           detectedAnswer = key;
-          text = text.replace(/\*/g, '').trim(); // Eliminar asterisco
+          text = text.replace(/\*/g, '').trim(); 
       }
 
       options.push({ key, text, image_url: optImg || null });
     });
-
-    // Fallback opciones
-    if (!options.length) {
-      for (const k of ['A','B','C','D','E']) {
-        const $o = $(`#opt-${globalQ}-${k}`);
-        if (!$o.length) continue;
-        $o.find('.option-dot,input').remove();
-        let text = $o.text().replace(/\s{2,}/g,' ').trim();
-        if (text.includes('*')) {
-            detectedAnswer = k;
-            text = text.replace(/\*/g, '').trim();
-        }
-        options.push({ key: k, text, image_url: null });
-      }
-    }
 
     curSit.questions.push({
       num:            globalQ,
@@ -206,11 +192,12 @@ async function parseLombanaHtml(html, imageMap) {
       correct_answer: detectedAnswer || answerKey[globalQ] || (options[0]?.key) || 'A',
       options
     });
-    return false;
+    return; // <-- CORREGIDO
   });
 
   if (curSit && curSit.questions.length) situations.push(curSit);
 
+  // FALLBACK
   if (!situations.length) {
     const fallback = parseTextLines($('body').text());
     Object.keys(answerKey).forEach((n, i) => {
@@ -330,22 +317,18 @@ function parseTextLines(raw, html) {
     if (om && curQ) { 
         let optKey = om[1].toUpperCase();
         let optText = om[2].trim();
-        
-        // Magia: Detectar asterisco en la opción
         if (optText.includes('*')) {
             curQ.correct_answer = optKey;
             optText = optText.replace(/\*/g, '').trim();
         }
-
         curQ.options.push({ key: optKey, text: optText, image_url: null }); 
         continue; 
     }
 
-    // Magia: Detectar palabras clave como "Respuesta: B" en el texto suelto
     const ansMatch = line.match(/^(?:Respuesta|Clave|Correcta)[^\w]*([A-Da-d])/i);
     if (ansMatch && curQ) {
         curQ.correct_answer = ansMatch[1].toUpperCase();
-        continue; // No agregamos esta palabra al texto visible
+        continue; 
     }
 
     if (inCtx && curSit)  ctxBuf.push(line);
